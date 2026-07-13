@@ -241,12 +241,13 @@ export function BreakoutRoomsModal() {
             </div>
 
             {/* Footer */}
-            <div className="flex gap-3 border-t border-border px-4 py-3 sm:px-5 sm:py-4">
+            <div className="flex gap-3 border-t border-border px-4 py-3 sm:px-5 sm:py-4" data-testid="breakout-modal-footer">
               {breakoutActive ? (
                 <motion.button
                   whileTap={{ scale: 0.98 }}
                   onClick={endBreakoutSession}
                   className="flex flex-1 items-center justify-center gap-2 rounded-xl bg-destructive py-2.5 text-sm font-display font-bold text-destructive-foreground transition-colors hover:bg-destructive/90"
+                  data-testid="breakout-end-button"
                 >
                   End Breakout Sessions
                 </motion.button>
@@ -255,6 +256,7 @@ export function BreakoutRoomsModal() {
                   whileTap={{ scale: 0.98 }}
                   onClick={handleStart}
                   className="flex flex-1 items-center justify-center gap-2 rounded-xl bg-primary py-2.5 text-sm font-display font-bold text-primary-foreground transition-colors hover:bg-primary/90"
+                  data-testid="breakout-start-button"
                 >
                   <ArrowRight className="w-4 h-4" /> Start Breakout Sessions
                 </motion.button>
