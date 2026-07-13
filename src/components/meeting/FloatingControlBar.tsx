@@ -30,6 +30,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { useState, useEffect } from 'react';
 import { ReactionBar } from './ReactionBar';
 import { useIsMobile } from '@/hooks/use-mobile';
+import { openMobileSubmenu } from './MobileSubmenus';
 
 /**
  * Forces a re-render when the viewport is resized, the tab is zoomed, or the
@@ -274,18 +275,18 @@ export function FloatingControlBar() {
                   {[
                     { icon: Settings, label: 'Settings', onClick: () => toggleSettings() },
                     { icon: LayoutGrid, label: 'Breakout', onClick: () => toggleBreakoutRooms() },
-                    { icon: PenSquare, label: 'Whiteboard', onClick: () => toggleRightPanel('ai') },
-                    { icon: BarChart3, label: 'Polls', onClick: () => toggleRightPanel('ai') },
+                    { icon: PenSquare, label: 'Whiteboard', onClick: () => openMobileSubmenu('whiteboard') },
+                    { icon: BarChart3, label: 'Polls', onClick: () => openMobileSubmenu('polls') },
                     { icon: Circle, label: isRecording ? 'Stop Rec' : 'Record', onClick: () => toggleRecording(), highlight: isRecording },
-                    { icon: ImageIcon, label: 'Background', onClick: () => toggleSettings() },
+                    { icon: ImageIcon, label: 'Background', onClick: () => openMobileSubmenu('background') },
                     { icon: UserPlus, label: 'Invite', onClick: () => toggleInvite() },
                     { icon: Monitor, label: isScreenSharing ? 'Stop Share' : 'Share', onClick: () => toggleScreenShare(), highlight: isScreenSharing },
-                    { icon: BrainCircuit, label: 'AI Assistant', onClick: () => toggleRightPanel('ai'), highlight: rightPanel === 'ai' },
-                    { icon: Activity, label: 'Stats', onClick: () => {/* perf hud toggle */} },
+                    { icon: BrainCircuit, label: 'AI Assistant', onClick: () => openMobileSubmenu('ai'), highlight: rightPanel === 'ai' },
+                    { icon: Activity, label: 'Stats', onClick: () => openMobileSubmenu('stats') },
                     { icon: Keyboard, label: 'Shortcuts', onClick: () => {
                       window.dispatchEvent(new KeyboardEvent('keydown', { key: '?', shiftKey: true }));
                     } },
-                    { icon: Info, label: 'About', onClick: () => {} },
+                    { icon: Info, label: 'About', onClick: () => openMobileSubmenu('about') },
                   ].map((item) => (
                     <button
                       key={item.label}
