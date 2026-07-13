@@ -221,9 +221,9 @@ export function LobbyScreen() {
       </header>
 
       {/* Main Content */}
-      <main className="flex-1 flex flex-col lg:flex-row items-center justify-center gap-8 lg:gap-16 px-4 sm:px-8 py-8">
+      <main className="flex-1 flex flex-col md:flex-row items-center justify-center gap-8 md:gap-12 lg:gap-16 px-4 sm:px-8 py-8">
         {/* Left - Actions */}
-        <div className="flex flex-col items-center lg:items-start gap-6 max-w-md w-full">
+        <div className="flex flex-col items-center md:items-start gap-6 max-w-md w-full">
           {extractMeetingCodeFromInput(searchParams.get('meeting')) && (
             <div className="w-full rounded-2xl border border-primary/20 bg-primary/5 p-4 text-left">
               <p className="font-display text-base font-bold text-foreground">You opened an invite link</p>
@@ -236,8 +236,8 @@ export function LobbyScreen() {
             </div>
           )}
 
-          <div className="text-center lg:text-left">
-            <h1 className="font-display font-bold text-2xl sm:text-4xl text-foreground leading-tight">
+          <div className="text-center md:text-left">
+            <h1 className="font-display font-bold text-2xl sm:text-4xl md:text-4xl text-foreground leading-tight">
               Video calls and meetings for everyone
             </h1>
             <p className="text-muted-foreground mt-3 text-sm sm:text-base">
