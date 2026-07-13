@@ -233,6 +233,7 @@ export const useMeetingStore = create<MeetingState>((set) => ({
   isMicOn: persistedMeetingState?.isMicOn ?? true,
   isCameraOn: persistedMeetingState?.isCameraOn ?? true,
   isScreenSharing: false,
+  isSelfCapture: false,
   isRecording: false,
   recordingStartTime: null,
   meetingJoinedAt: persistedMeetingState?.meetingJoinedAt ?? null,
@@ -270,6 +271,7 @@ export const useMeetingStore = create<MeetingState>((set) => ({
   toggleMic: () => set((s) => ({ isMicOn: !s.isMicOn })),
   toggleCamera: () => set((s) => ({ isCameraOn: !s.isCameraOn })),
   toggleScreenShare: () => set((s) => ({ isScreenSharing: !s.isScreenSharing })),
+  setSelfCapture: (v) => set({ isSelfCapture: v }),
   toggleRecording: () =>
     set((s) => ({
       isRecording: !s.isRecording,
