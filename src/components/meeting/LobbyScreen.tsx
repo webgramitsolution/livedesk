@@ -192,14 +192,14 @@ export function LobbyScreen() {
   };
 
   return (
-    <div className="h-screen flex flex-col bg-background relative">
+    <div className="min-h-dvh flex flex-col bg-background relative overflow-x-hidden">
       {/* Top Bar */}
-      <header className="flex items-center justify-between px-4 sm:px-6 py-3 border-b border-border">
+      <header className="flex items-center justify-between px-4 sm:px-6 py-3 border-b border-border sticky top-0 bg-background/95 backdrop-blur-sm z-10">
         <div className="flex items-center gap-2">
           <div className="w-9 h-9 rounded-xl bg-primary flex items-center justify-center">
             <Video className="w-5 h-5 text-primary-foreground" />
           </div>
-          <span className="font-display font-bold text-lg text-foreground hidden sm:block">Zoom Connect</span>
+          <span className="font-display font-bold text-base sm:text-lg text-foreground">Zoom Connect</span>
         </div>
         {userEmail && (
           <div className="flex items-center gap-2">
@@ -221,7 +221,7 @@ export function LobbyScreen() {
       </header>
 
       {/* Main Content */}
-      <main className="flex-1 flex flex-col md:flex-row items-center justify-center gap-8 md:gap-12 lg:gap-16 px-4 sm:px-8 py-8">
+      <main className="flex-1 flex flex-col md:flex-row items-center justify-center gap-6 sm:gap-8 md:gap-12 lg:gap-16 px-4 sm:px-6 md:px-8 py-6 sm:py-8">
         {/* Left - Actions */}
         <div className="flex flex-col items-center md:items-start gap-6 w-full max-w-md md:max-w-lg">
           {extractMeetingCodeFromInput(searchParams.get('meeting')) && (
@@ -313,9 +313,9 @@ export function LobbyScreen() {
           </div>
         </div>
 
-        {/* Right - Carousel */}
-        <div className="flex flex-col items-center gap-4 max-w-sm w-full">
-          <div className="w-64 h-64 sm:w-72 sm:h-72 rounded-full bg-muted flex items-center justify-center relative overflow-hidden">
+         {/* Right - Carousel */}
+        <div className="flex flex-col items-center gap-3 sm:gap-4 max-w-sm w-full">
+          <div className="w-40 h-40 sm:w-56 sm:h-56 md:w-64 md:h-64 lg:w-72 lg:h-72 rounded-full bg-muted flex items-center justify-center relative overflow-hidden">
             <AnimatePresence mode="wait">
               <motion.div
                 key={currentSlide}
@@ -323,23 +323,23 @@ export function LobbyScreen() {
                 animate={{ opacity: 1, x: 0 }}
                 exit={{ opacity: 0, x: -40 }}
                 transition={{ duration: 0.3 }}
-                className="flex flex-col items-center justify-center text-center p-8"
+                className="flex flex-col items-center justify-center text-center p-6 sm:p-8"
               >
-                <div className="w-16 h-16 rounded-2xl bg-primary/10 flex items-center justify-center mb-3">
-                  {currentSlide === 0 && <Link2 className="w-8 h-8 text-primary" />}
-                  {currentSlide === 1 && <CalendarPlus className="w-8 h-8 text-primary" />}
-                  {currentSlide === 2 && <Video className="w-8 h-8 text-primary" />}
+                <div className="w-12 h-12 sm:w-16 sm:h-16 rounded-2xl bg-primary/10 flex items-center justify-center mb-3">
+                  {currentSlide === 0 && <Link2 className="w-6 h-6 sm:w-8 sm:h-8 text-primary" />}
+                  {currentSlide === 1 && <CalendarPlus className="w-6 h-6 sm:w-8 sm:h-8 text-primary" />}
+                  {currentSlide === 2 && <Video className="w-6 h-6 sm:w-8 sm:h-8 text-primary" />}
                 </div>
               </motion.div>
             </AnimatePresence>
           </div>
 
           {/* Slide text */}
-          <div className="text-center">
-            <h3 className="font-display font-bold text-foreground text-lg">
+          <div className="text-center px-4">
+            <h3 className="font-display font-bold text-foreground text-base sm:text-lg">
               {CAROUSEL_SLIDES[currentSlide].title}
             </h3>
-            <p className="text-muted-foreground text-sm mt-1 max-w-xs mx-auto">
+            <p className="text-muted-foreground text-xs sm:text-sm mt-1 max-w-xs mx-auto">
               {CAROUSEL_SLIDES[currentSlide].description}
             </p>
           </div>
