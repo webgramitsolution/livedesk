@@ -61,6 +61,7 @@ export function MeetingRoom() {
       __ZOOM_CONNECT_E2E__?: {
         addBreakoutParticipants: (names: string[]) => void;
         assignAllToFirstRoom?: () => void;
+        simulateSelfCaptureShare?: (on: boolean) => void;
       };
     };
 
@@ -81,6 +82,12 @@ export function MeetingRoom() {
           { ...first, participantIds: state.participants.map((p) => p.id) },
           ...rest.map((r) => ({ ...r, participantIds: [] as string[] })),
         ]);
+      },
+      simulateSelfCaptureShare: (on) => {
+        const state = useMeetingStore.getState();
+        state.setSelfCapture(on);
+        if (on && !state.isScreenSharing) state.toggleScreenShare();
+        if (!on && state.isScreenSharing) state.toggleScreenShare();
       },
     };
 
