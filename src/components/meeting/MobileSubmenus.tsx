@@ -1,11 +1,34 @@
 import { useEffect, useState } from 'react';
 import { AnimatePresence } from 'framer-motion';
-import { PenSquare, BarChart3, Image as ImageIcon, Activity, Info, BrainCircuit, Plus } from 'lucide-react';
+import {
+  BarChart3,
+  Activity,
+  BrainCircuit,
+  Plus,
+  Mic,
+  Camera,
+  Monitor,
+  Hand,
+  Circle,
+  MessageSquare,
+  Users,
+  LogOut,
+  Copy,
+  Check,
+  Link as LinkIcon,
+  Mail,
+  MessageCircle,
+  Send,
+  QrCode,
+  Smartphone,
+  ExternalLink,
+} from 'lucide-react';
 import { MobileModalShell } from './MobileModalShell';
 import { WhiteboardOverlay } from './WhiteboardOverlay';
 import { useMeetingStore } from '@/store/meetingStore';
 import { usePanelOverlayMode } from '@/hooks/use-mobile';
 import { Switch } from '@/components/ui/switch';
+import { buildMeetingLink } from '@/lib/meetingInvite';
 
 export type MobileSubmenu =
   | 'whiteboard'
@@ -14,6 +37,9 @@ export type MobileSubmenu =
   | 'stats'
   | 'about'
   | 'ai'
+  | 'invite'
+  | 'shortcuts'
+  | 'screen-share-unsupported'
   | null;
 
 const EVENT_NAME = 'mobile-submenu:open';
