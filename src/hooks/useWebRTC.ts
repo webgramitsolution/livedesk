@@ -2,6 +2,7 @@ import { useEffect, useRef, useCallback, useState } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { useMeetingStore } from '@/store/meetingStore';
 import { createNoiseCancelledStream } from '@/lib/audio/noiseCancellation';
+import { toast } from 'sonner';
 
 const ICE_SERVERS: RTCConfiguration = {
   iceServers: [
@@ -41,9 +42,31 @@ export function useWebRTC(meetingId: string, isInMeeting: boolean) {
   const myPeerIdRef = useRef<string>(crypto.randomUUID());
   const [localStream, setLocalStream] = useState<MediaStream | null>(null);
   const [screenStream, setScreenStream] = useState<MediaStream | null>(null);
+  const [isSelfCapture, setIsSelfCapture] = useState(false);
   const [remoteStreams, setRemoteStreams] = useState<Map<string, MediaStream>>(new Map());
   const [remoteScreenStream, setRemoteScreenStream] = useState<MediaStream | null>(null);
   const { isMicOn, isCameraOn, isScreenSharing, toggleScreenShare, isNoiseCancellationOn, meetingSessionId } = useMeetingStore();
+
+  // Unique capture-handle so we can detect if the user picks the meeting tab itself
+  const captureHandleRef = useRef<string>(`zoom-connect-${myPeerIdRef.current}`);
+  useEffect(() => {
+    captureHandleRef.current = `zoom-connect-${myPeerIdRef.current}`;
+    try {
+      (navigator.mediaDevices as MediaDevices & {
+        setCaptureHandleConfig?: (cfg: {
+          handle: string;
+          exposeOrigin?: boolean;
+          permittedOrigins?: string[];
+        }) => void;
+      }).setCaptureHandleConfig?.({
+        handle: captureHandleRef.current,
+        exposeOrigin: true,
+        permittedOrigins: ['*'],
+      });
+    } catch {
+      /* not supported – runtime fallback still works via displaySurface */
+    }
+  }, [meetingSessionId]);
 
   useEffect(() => {
     if (meetingSessionId) {
@@ -284,7 +307,31 @@ export function useWebRTC(meetingId: string, isInMeeting: boolean) {
       const stream = await navigator.mediaDevices.getDisplayMedia({
         video: true,
         audio: true,
-      });
+        // Chromium hints — hide the meeting tab from the picker where supported.
+        // Cast because these are not yet in the ambient DOM lib.
+        ...({ selfBrowserSurface: 'exclude', surfaceSwitching: 'include' } as Record<string, string>),
+      } as DisplayMediaStreamOptions);
+
+      // --- Recursive-mirror (self-capture) detection ---
+      const videoTrack = stream.getVideoTracks()[0];
+      const settings = videoTrack?.getSettings?.() as MediaTrackSettings & { displaySurface?: string };
+      const handle = (videoTrack as MediaStreamTrack & {
+        getCaptureHandle?: () => { handle?: string; origin?: string } | null;
+      })?.getCaptureHandle?.();
+      const selfByHandle = !!handle?.handle && handle.handle === captureHandleRef.current;
+      const selfByOrigin =
+        !!handle?.origin && typeof window !== 'undefined' && handle.origin === window.location.origin;
+      // Best-effort: if displaySurface is 'browser' we still can't be certain it's
+      // *this* tab, but combined with a matching handle it's conclusive.
+      const selfCapture = selfByHandle || (settings?.displaySurface === 'browser' && selfByOrigin);
+
+      setIsSelfCapture(selfCapture);
+      if (selfCapture) {
+        toast.warning(
+          "You're sharing the meeting window. This may create a recursive screen effect. Consider sharing another window or your entire screen.",
+          { duration: 8000 }
+        );
+      }
 
       // Mute local playback of screen share audio to prevent feedback loop
       stream.getAudioTracks().forEach((track) => {
@@ -342,6 +389,7 @@ export function useWebRTC(meetingId: string, isInMeeting: boolean) {
 
       screenStreamRef.current = null;
       setScreenStream(null);
+      setIsSelfCapture(false);
 
       // Renegotiate
       peersRef.current.forEach((peer) => {
@@ -563,5 +611,5 @@ export function useWebRTC(meetingId: string, isInMeeting: boolean) {
     };
   }, [isInMeeting, localStream, meetingId, sendOfferToPeer, handleOffer, handleAnswer, handleIceCandidate, updateRemoteStreams]);
 
-  return { localStream, remoteStreams, screenStream, remoteScreenStream, myPeerId: myPeerIdRef.current, getPeerStats };
+  return { localStream, remoteStreams, screenStream, remoteScreenStream, isSelfCapture, myPeerId: myPeerIdRef.current, getPeerStats };
 }
