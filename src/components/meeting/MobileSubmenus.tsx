@@ -98,17 +98,55 @@ export function MobileSubmenus() {
   const showPerfHud = useMeetingStore((s) => s.showPerfHud);
   const togglePerfHud = useMeetingStore((s) => s.togglePerfHud);
   const setRightPanel = useMeetingStore((s) => s.setRightPanel);
+  const meetingId = useMeetingStore((s) => s.meetingId);
+  const [copied, setCopied] = useState<'id' | 'link' | null>(null);
+
+  const meetingLink = buildMeetingLink(meetingId);
+  const qrSrc = `https://api.qrserver.com/v1/create-qr-code/?size=300x300&margin=0&data=${encodeURIComponent(meetingLink)}`;
+
+  const handleCopy = (text: string, type: 'id' | 'link') => {
+    navigator.clipboard.writeText(text);
+    setCopied(type);
+    setTimeout(() => setCopied(null), 2000);
+  };
+
+  const shareOptions = [
+    {
+      icon: MessageCircle,
+      label: 'WhatsApp',
+      bg: 'bg-emerald-500',
+      onClick: () => {
+        const msg = encodeURIComponent(`Join my meeting: ${meetingLink}\nID: ${meetingId}`);
+        const isMob = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
+        window.open(isMob ? `whatsapp://send?text=${msg}` : `https://web.whatsapp.com/send?text=${msg}`, '_blank', 'noopener,noreferrer');
+      },
+    },
+    {
+      icon: Send,
+      label: 'Telegram',
+      bg: 'bg-sky-500',
+      onClick: () => {
+        const text = encodeURIComponent(`Join my meeting: ${meetingLink}`);
+        window.open(`https://t.me/share/url?url=${encodeURIComponent(meetingLink)}&text=${text}`, '_blank', 'noopener,noreferrer');
+      },
+    },
+    { icon: Mail, label: 'Email', bg: 'bg-rose-500', onClick: () => window.open(`mailto:?subject=Join my meeting&body=${encodeURIComponent(meetingLink)}`) },
+    { icon: LinkIcon, label: 'Copy Link', bg: 'bg-primary', onClick: () => handleCopy(meetingLink, 'link') },
+    { icon: Smartphone, label: 'SMS', bg: 'bg-violet-500', onClick: () => window.open(`sms:?&body=${encodeURIComponent(meetingLink)}`) },
+  ];
 
   useEffect(() => {
     const handler = (e: Event) => {
       const name = (e as CustomEvent<MobileSubmenu>).detail;
       if (mode !== 'mobile') return;
       if (name === 'ai') {
-        // AI assistant already has a mobile full-screen panel via right panel system
+        setActive(null);
         setRightPanel('ai');
         return;
       }
-      setActive(name);
+      // Single source-of-truth: opening any submenu closes any previous one
+      setActive(null);
+      requestAnimationFrame(() => setActive(name));
     };
     window.addEventListener(EVENT_NAME, handler);
     return () => window.removeEventListener(EVENT_NAME, handler);
