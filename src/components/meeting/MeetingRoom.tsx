@@ -33,7 +33,7 @@ export function MeetingRoom() {
   const setRightPanel = useMeetingStore((s) => s.setRightPanel);
   const isMobile = useIsMobile();
   const videoAreaRef = useRef<HTMLDivElement>(null);
-  const { localStream, remoteStreams, screenStream, remoteScreenStream, isSelfCapture, getPeerStats } = useWebRTC(meetingId, screen === 'meeting');
+  const { localStream, remoteStreams, screenStream, remoteScreenStream, getPeerStats } = useWebRTC(meetingId, screen === 'meeting');
 
   const PANEL_CYCLE: Array<'ai' | 'participants' | 'chat'> = ['ai', 'participants', 'chat'];
   useSwipeGesture(videoAreaRef, {
@@ -61,6 +61,7 @@ export function MeetingRoom() {
       __ZOOM_CONNECT_E2E__?: {
         addBreakoutParticipants: (names: string[]) => void;
         assignAllToFirstRoom?: () => void;
+        simulateSelfCaptureShare?: (on: boolean) => void;
       };
     };
 
@@ -81,6 +82,12 @@ export function MeetingRoom() {
           { ...first, participantIds: state.participants.map((p) => p.id) },
           ...rest.map((r) => ({ ...r, participantIds: [] as string[] })),
         ]);
+      },
+      simulateSelfCaptureShare: (on) => {
+        const state = useMeetingStore.getState();
+        state.setSelfCapture(on);
+        if (on && !state.isScreenSharing) state.toggleScreenShare();
+        if (!on && state.isScreenSharing) state.toggleScreenShare();
       },
     };
 
@@ -108,7 +115,7 @@ export function MeetingRoom() {
       <NavigationBar />
       <div className="flex-1 flex overflow-hidden">
         <div ref={videoAreaRef} className="flex-1 relative flex flex-col min-w-0">
-          <VideoGrid localStream={processedLocalStream} remoteStreams={remoteStreams} screenStream={screenStream} remoteScreenStream={remoteScreenStream} isSelfCapture={isSelfCapture} />
+          <VideoGrid localStream={processedLocalStream} remoteStreams={remoteStreams} screenStream={screenStream} remoteScreenStream={remoteScreenStream} />
           <FloatingControlBar />
         </div>
         <AISidebar />

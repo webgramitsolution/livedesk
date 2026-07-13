@@ -42,10 +42,9 @@ export function useWebRTC(meetingId: string, isInMeeting: boolean) {
   const myPeerIdRef = useRef<string>(crypto.randomUUID());
   const [localStream, setLocalStream] = useState<MediaStream | null>(null);
   const [screenStream, setScreenStream] = useState<MediaStream | null>(null);
-  const [isSelfCapture, setIsSelfCapture] = useState(false);
   const [remoteStreams, setRemoteStreams] = useState<Map<string, MediaStream>>(new Map());
   const [remoteScreenStream, setRemoteScreenStream] = useState<MediaStream | null>(null);
-  const { isMicOn, isCameraOn, isScreenSharing, toggleScreenShare, isNoiseCancellationOn, meetingSessionId } = useMeetingStore();
+  const { isMicOn, isCameraOn, isScreenSharing, toggleScreenShare, isNoiseCancellationOn, meetingSessionId, setSelfCapture } = useMeetingStore();
 
   // Unique capture-handle so we can detect if the user picks the meeting tab itself
   const captureHandleRef = useRef<string>(`zoom-connect-${myPeerIdRef.current}`);
@@ -325,7 +324,7 @@ export function useWebRTC(meetingId: string, isInMeeting: boolean) {
       // *this* tab, but combined with a matching handle it's conclusive.
       const selfCapture = selfByHandle || (settings?.displaySurface === 'browser' && selfByOrigin);
 
-      setIsSelfCapture(selfCapture);
+      setSelfCapture(selfCapture);
       if (selfCapture) {
         toast.warning(
           "You're sharing the meeting window. This may create a recursive screen effect. Consider sharing another window or your entire screen.",
@@ -389,7 +388,7 @@ export function useWebRTC(meetingId: string, isInMeeting: boolean) {
 
       screenStreamRef.current = null;
       setScreenStream(null);
-      setIsSelfCapture(false);
+      setSelfCapture(false);
 
       // Renegotiate
       peersRef.current.forEach((peer) => {
@@ -611,5 +610,5 @@ export function useWebRTC(meetingId: string, isInMeeting: boolean) {
     };
   }, [isInMeeting, localStream, meetingId, sendOfferToPeer, handleOffer, handleAnswer, handleIceCandidate, updateRemoteStreams]);
 
-  return { localStream, remoteStreams, screenStream, remoteScreenStream, isSelfCapture, myPeerId: myPeerIdRef.current, getPeerStats };
+  return { localStream, remoteStreams, screenStream, remoteScreenStream, myPeerId: myPeerIdRef.current, getPeerStats };
 }

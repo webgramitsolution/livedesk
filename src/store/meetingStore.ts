@@ -55,6 +55,7 @@ interface MeetingState {
   isMicOn: boolean;
   isCameraOn: boolean;
   isScreenSharing: boolean;
+  isSelfCapture: boolean;
   isRecording: boolean;
   recordingStartTime: number | null;
   meetingJoinedAt: number | null;
@@ -94,6 +95,7 @@ interface MeetingState {
   toggleMic: () => void;
   toggleCamera: () => void;
   toggleScreenShare: () => void;
+  setSelfCapture: (v: boolean) => void;
   toggleRecording: () => void;
   toggleTranslation: () => void;
   toggleNoiseCancellation: () => void;
@@ -231,6 +233,7 @@ export const useMeetingStore = create<MeetingState>((set) => ({
   isMicOn: persistedMeetingState?.isMicOn ?? true,
   isCameraOn: persistedMeetingState?.isCameraOn ?? true,
   isScreenSharing: false,
+  isSelfCapture: false,
   isRecording: false,
   recordingStartTime: null,
   meetingJoinedAt: persistedMeetingState?.meetingJoinedAt ?? null,
@@ -268,6 +271,7 @@ export const useMeetingStore = create<MeetingState>((set) => ({
   toggleMic: () => set((s) => ({ isMicOn: !s.isMicOn })),
   toggleCamera: () => set((s) => ({ isCameraOn: !s.isCameraOn })),
   toggleScreenShare: () => set((s) => ({ isScreenSharing: !s.isScreenSharing })),
+  setSelfCapture: (v) => set({ isSelfCapture: v }),
   toggleRecording: () =>
     set((s) => ({
       isRecording: !s.isRecording,
@@ -431,6 +435,7 @@ export const useMeetingStore = create<MeetingState>((set) => ({
       meetingId: '',
       meetingSessionId: '',
       isScreenSharing: false,
+      isSelfCapture: false,
       isRecording: false,
       recordingStartTime: null,
       meetingJoinedAt: null,
