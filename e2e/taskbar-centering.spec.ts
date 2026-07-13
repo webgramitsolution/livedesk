@@ -872,11 +872,11 @@ test.describe('Screen share: local preview frame suspension', () => {
   test('resumes local preview immediately after sharing ends', async ({ page }) => {
     await page.setViewportSize({ width: 1280, height: 800 });
     await page.goto('/');
-    const hook = () => page.evaluate((on) => {
+    const hook = (on: boolean) => page.evaluate((v) => {
       (window as typeof window & {
         __ZOOM_CONNECT_E2E__?: { simulateSelfCaptureShare?: (on: boolean) => void };
-      }).__ZOOM_CONNECT_E2E__?.simulateSelfCaptureShare?.(on as boolean);
-    }, arguments[0]);
+      }).__ZOOM_CONNECT_E2E__?.simulateSelfCaptureShare?.(v);
+    }, on);
     await page.evaluate(() => {
       (window as typeof window & {
         __ZOOM_CONNECT_E2E__?: { simulateSelfCaptureShare?: (on: boolean) => void };
