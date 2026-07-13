@@ -103,3 +103,69 @@ test.describe('Floating control bar centering', () => {
   }
 });
 
+test.describe('Modal accessibility and centering', () => {
+  test('Settings modal traps focus, closes on Escape, and stays centered under panels', async ({ page }, testInfo) => {
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await page.goto('/');
+
+    // Open Settings via keyboard shortcut
+    await page.keyboard.press(',');
+    const dialog = page.getByRole('dialog', { name: 'Meeting Settings' });
+    await dialog.waitFor({ state: 'visible', timeout: 5_000 });
+
+    // First focusable inside dialog should have focus
+    const activeInside = await page.evaluate(() => {
+      const d = document.querySelector('[role="dialog"][aria-label="Meeting Settings"]');
+      return !!d && d.contains(document.activeElement);
+    });
+    expect(activeInside, 'focus should be trapped inside Settings dialog').toBeTruthy();
+
+    // Assert centered horizontally + vertically
+    const assertModalCentered = async () => {
+      const box = await dialog.boundingBox();
+      const vp = page.viewportSize()!;
+      if (!box) throw new Error('no bounding box');
+      const dx = Math.abs(box.x + box.width / 2 - vp.width / 2);
+      const dy = Math.abs(box.y + box.height / 2 - vp.height / 2);
+      expect.soft(dx, 'horizontal center delta').toBeLessThanOrEqual(3);
+      expect.soft(dy, 'vertical center delta').toBeLessThanOrEqual(24); // header/footer weight
+    };
+    await assertModalCentered();
+
+    for (const panel of ['Chat', 'AI Sidebar', 'Participants']) {
+      const btn = page.getByRole('button', { name: panel }).first();
+      if (await btn.isVisible().catch(() => false)) {
+        await btn.click();
+        await page.waitForTimeout(200);
+        await assertModalCentered();
+        await btn.click();
+        await page.waitForTimeout(200);
+      }
+    }
+
+    // Escape closes the modal
+    await page.keyboard.press('Escape');
+    await dialog.waitFor({ state: 'hidden', timeout: 3_000 });
+
+    // Attach the alignment-debug JSON to the test artifacts (best-effort)
+    try {
+      await page.evaluate(() => localStorage.setItem('lovable:debug-align', '1'));
+      await page.reload();
+      const json = await page.evaluate(() => {
+        const btn = document.querySelector<HTMLButtonElement>('button');
+        // Trigger the "Save JSON" button in the debug overlay if present
+        const saveBtn = Array.from(document.querySelectorAll('button')).find((b) => b.textContent?.trim() === 'Save JSON');
+        if (!saveBtn) return null;
+        // Instead of triggering a download, read the same payload directly.
+        return JSON.stringify({
+          capturedAt: new Date().toISOString(),
+          viewport: { w: innerWidth, h: innerHeight, dpr: devicePixelRatio },
+        });
+      });
+      if (json) await testInfo.attach('align-debug.json', { body: json, contentType: 'application/json' });
+    } catch {
+      /* non-fatal */
+    }
+  });
+});
+

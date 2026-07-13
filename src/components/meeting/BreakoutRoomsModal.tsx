@@ -137,7 +137,7 @@ export function BreakoutRoomsModal() {
             exit={{ opacity: 0, scale: 0.95, y: 20 }}
             transition={{ type: 'spring', damping: 25, stiffness: 300 }}
             ref={dialogRef}
-            className="relative flex flex-col overflow-hidden rounded-2xl border border-border bg-background control-bar-elevated w-full h-auto max-w-[min(32rem,calc(100vw-1rem))] max-h-[min(28rem,calc(100dvh-1rem))] sm:max-w-[min(32rem,calc(100vw-2rem))] sm:max-h-[min(28rem,calc(100dvh-2rem))]"
+            className="relative flex flex-col overflow-hidden rounded-2xl border border-border bg-background control-bar-elevated w-[calc(100vw-24px)] sm:w-[90vw] lg:w-full max-w-[52rem] max-h-[85dvh]"
           >
             {/* Header */}
             <div className="flex items-center justify-between border-b border-border px-4 py-3 sm:px-5 sm:py-4">
