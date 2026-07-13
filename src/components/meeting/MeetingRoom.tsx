@@ -54,6 +54,26 @@ export function MeetingRoom() {
   const processedLocalStream = useVirtualBackground(localStream);
   const { startRecording, stopRecording, recordingBlob, downloadRecording, clearRecording } = useMeetingRecorder();
 
+  useEffect(() => {
+    if (import.meta.env.PROD || typeof window === 'undefined') return;
+
+    const e2eWindow = window as typeof window & {
+      __ZOOM_CONNECT_E2E__?: {
+        addBreakoutParticipants: (names: string[]) => void;
+      };
+    };
+
+    e2eWindow.__ZOOM_CONNECT_E2E__ = {
+      addBreakoutParticipants: (names) => {
+        names.forEach((name) => useMeetingStore.getState().addSimulatedParticipant(name));
+      },
+    };
+
+    return () => {
+      delete e2eWindow.__ZOOM_CONNECT_E2E__;
+    };
+  }, []);
+
   // Sync store recording toggle with actual MediaRecorder
   useEffect(() => {
     if (isRecording && processedLocalStream) {
