@@ -30,7 +30,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { useState, useEffect } from 'react';
 import { ReactionBar } from './ReactionBar';
 import { useIsMobile } from '@/hooks/use-mobile';
-import { openMobileSubmenu } from './MobileSubmenus';
+import { openMobileSubmenu, isRealMobileDevice, isChromeDevtoolsEmulation } from './MobileSubmenus';
 
 /**
  * Forces a re-render when the viewport is resized, the tab is zoomed, or the
@@ -279,13 +279,28 @@ export function FloatingControlBar() {
                     { icon: BarChart3, label: 'Polls', onClick: () => openMobileSubmenu('polls') },
                     { icon: Circle, label: isRecording ? 'Stop Rec' : 'Record', onClick: () => toggleRecording(), highlight: isRecording },
                     { icon: ImageIcon, label: 'Background', onClick: () => openMobileSubmenu('background') },
-                    { icon: UserPlus, label: 'Invite', onClick: () => toggleInvite() },
-                    { icon: Monitor, label: isScreenSharing ? 'Stop Share' : 'Share', onClick: () => toggleScreenShare(), highlight: isScreenSharing },
+                    { icon: UserPlus, label: 'Invite', onClick: () => openMobileSubmenu('invite') },
+                    {
+                      icon: Monitor,
+                      label: isScreenSharing ? 'Stop Share' : 'Share',
+                      onClick: () => {
+                        // Already sharing → stop normally
+                        if (isScreenSharing) { toggleScreenShare(); return; }
+                        // Chrome DevTools mobile emulation → show informational sheet, never open desktop picker
+                        if (isChromeDevtoolsEmulation()) { openMobileSubmenu('screen-share-unsupported'); return; }
+                        // Real mobile device without getDisplayMedia support → unsupported sheet
+                        const hasApi = typeof navigator !== 'undefined'
+                          && !!navigator.mediaDevices
+                          && typeof navigator.mediaDevices.getDisplayMedia === 'function';
+                        if (isRealMobileDevice() && !hasApi) { openMobileSubmenu('screen-share-unsupported'); return; }
+                        // Supported (e.g. Chrome Android with the API) → proceed
+                        toggleScreenShare();
+                      },
+                      highlight: isScreenSharing,
+                    },
                     { icon: BrainCircuit, label: 'AI Assistant', onClick: () => openMobileSubmenu('ai'), highlight: rightPanel === 'ai' },
                     { icon: Activity, label: 'Stats', onClick: () => openMobileSubmenu('stats') },
-                    { icon: Keyboard, label: 'Shortcuts', onClick: () => {
-                      window.dispatchEvent(new KeyboardEvent('keydown', { key: '?', shiftKey: true }));
-                    } },
+                    { icon: Keyboard, label: 'Shortcuts', onClick: () => openMobileSubmenu('shortcuts') },
                     { icon: Info, label: 'About', onClick: () => openMobileSubmenu('about') },
                   ].map((item) => (
                     <button

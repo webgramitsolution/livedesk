@@ -1,11 +1,34 @@
 import { useEffect, useState } from 'react';
 import { AnimatePresence } from 'framer-motion';
-import { PenSquare, BarChart3, Image as ImageIcon, Activity, Info, BrainCircuit, Plus } from 'lucide-react';
+import {
+  BarChart3,
+  Activity,
+  BrainCircuit,
+  Plus,
+  Mic,
+  Camera,
+  Monitor,
+  Hand,
+  Circle,
+  MessageSquare,
+  Users,
+  LogOut,
+  Copy,
+  Check,
+  Link as LinkIcon,
+  Mail,
+  MessageCircle,
+  Send,
+  QrCode,
+  Smartphone,
+  ExternalLink,
+} from 'lucide-react';
 import { MobileModalShell } from './MobileModalShell';
 import { WhiteboardOverlay } from './WhiteboardOverlay';
 import { useMeetingStore } from '@/store/meetingStore';
 import { usePanelOverlayMode } from '@/hooks/use-mobile';
 import { Switch } from '@/components/ui/switch';
+import { buildMeetingLink } from '@/lib/meetingInvite';
 
 export type MobileSubmenu =
   | 'whiteboard'
@@ -14,6 +37,9 @@ export type MobileSubmenu =
   | 'stats'
   | 'about'
   | 'ai'
+  | 'invite'
+  | 'shortcuts'
+  | 'screen-share-unsupported'
   | null;
 
 const EVENT_NAME = 'mobile-submenu:open';
@@ -33,6 +59,32 @@ const VIRTUAL_BACKGROUNDS = [
   { value: 'library', label: 'Library', preview: '📚' },
 ];
 
+const SHORTCUT_ITEMS = [
+  { icon: Mic, label: 'Microphone', desc: 'Mute / Unmute', key: 'M' },
+  { icon: Camera, label: 'Camera', desc: 'On / Off', key: 'V' },
+  { icon: Monitor, label: 'Screen Share', desc: 'Start / Stop', key: 'S' },
+  { icon: Hand, label: 'Raise Hand', desc: 'Toggle', key: 'H' },
+  { icon: Circle, label: 'Recording', desc: 'Start / Stop', key: 'R' },
+  { icon: MessageSquare, label: 'Chat', desc: 'Open panel', key: 'C' },
+  { icon: Users, label: 'Participants', desc: 'Open panel', key: 'P' },
+  { icon: LogOut, label: 'Leave Meeting', desc: 'Exit', key: 'Q' },
+];
+
+/** True when running in a real mobile browser (Android / iOS user agent). */
+export function isRealMobileDevice(): boolean {
+  if (typeof navigator === 'undefined') return false;
+  const ua = navigator.userAgent || '';
+  const uaMobile = /Android|iPhone|iPad|iPod|Mobile/i.test(ua);
+  const iPadOs = /Macintosh/.test(ua) && typeof document !== 'undefined' && 'ontouchend' in document;
+  return uaMobile || iPadOs;
+}
+
+/** True when viewport looks mobile but user agent is desktop (Chrome DevTools emulation). */
+export function isChromeDevtoolsEmulation(): boolean {
+  if (typeof window === 'undefined') return false;
+  return window.innerWidth < 768 && !isRealMobileDevice();
+}
+
 /**
  * Central mobile-only router for "More Options" submenus.
  * Ensures no centered desktop dialog opens when width < 768px — each submenu
@@ -46,17 +98,55 @@ export function MobileSubmenus() {
   const showPerfHud = useMeetingStore((s) => s.showPerfHud);
   const togglePerfHud = useMeetingStore((s) => s.togglePerfHud);
   const setRightPanel = useMeetingStore((s) => s.setRightPanel);
+  const meetingId = useMeetingStore((s) => s.meetingId);
+  const [copied, setCopied] = useState<'id' | 'link' | null>(null);
+
+  const meetingLink = buildMeetingLink(meetingId);
+  const qrSrc = `https://api.qrserver.com/v1/create-qr-code/?size=300x300&margin=0&data=${encodeURIComponent(meetingLink)}`;
+
+  const handleCopy = (text: string, type: 'id' | 'link') => {
+    navigator.clipboard.writeText(text);
+    setCopied(type);
+    setTimeout(() => setCopied(null), 2000);
+  };
+
+  const shareOptions = [
+    {
+      icon: MessageCircle,
+      label: 'WhatsApp',
+      bg: 'bg-emerald-500',
+      onClick: () => {
+        const msg = encodeURIComponent(`Join my meeting: ${meetingLink}\nID: ${meetingId}`);
+        const isMob = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
+        window.open(isMob ? `whatsapp://send?text=${msg}` : `https://web.whatsapp.com/send?text=${msg}`, '_blank', 'noopener,noreferrer');
+      },
+    },
+    {
+      icon: Send,
+      label: 'Telegram',
+      bg: 'bg-sky-500',
+      onClick: () => {
+        const text = encodeURIComponent(`Join my meeting: ${meetingLink}`);
+        window.open(`https://t.me/share/url?url=${encodeURIComponent(meetingLink)}&text=${text}`, '_blank', 'noopener,noreferrer');
+      },
+    },
+    { icon: Mail, label: 'Email', bg: 'bg-rose-500', onClick: () => window.open(`mailto:?subject=Join my meeting&body=${encodeURIComponent(meetingLink)}`) },
+    { icon: LinkIcon, label: 'Copy Link', bg: 'bg-primary', onClick: () => handleCopy(meetingLink, 'link') },
+    { icon: Smartphone, label: 'SMS', bg: 'bg-violet-500', onClick: () => window.open(`sms:?&body=${encodeURIComponent(meetingLink)}`) },
+  ];
 
   useEffect(() => {
     const handler = (e: Event) => {
       const name = (e as CustomEvent<MobileSubmenu>).detail;
       if (mode !== 'mobile') return;
       if (name === 'ai') {
-        // AI assistant already has a mobile full-screen panel via right panel system
+        setActive(null);
         setRightPanel('ai');
         return;
       }
-      setActive(name);
+      // Single source-of-truth: opening any submenu closes any previous one
+      setActive(null);
+      requestAnimationFrame(() => setActive(name));
     };
     window.addEventListener(EVENT_NAME, handler);
     return () => window.removeEventListener(EVENT_NAME, handler);
@@ -161,6 +251,130 @@ export function MobileSubmenus() {
               <a className="flex min-h-12 items-center justify-between rounded-xl border border-border px-4 text-sm text-foreground" href="#">Terms of Service <span className="text-muted-foreground">›</span></a>
               <a className="flex min-h-12 items-center justify-between rounded-xl border border-border px-4 text-sm text-foreground" href="#">Privacy Policy <span className="text-muted-foreground">›</span></a>
               <a className="flex min-h-12 items-center justify-between rounded-xl border border-border px-4 text-sm text-foreground" href="#">Support <span className="text-muted-foreground">›</span></a>
+            </div>
+          </div>
+        </MobileModalShell>
+      )}
+
+      {active === 'invite' && (
+        <MobileModalShell
+          key="invite"
+          title="Share Meeting"
+          ariaLabel="Invite participants"
+          onClose={close}
+          footer={
+            <button onClick={close} className="h-12 w-full rounded-2xl bg-primary text-sm font-semibold text-primary-foreground">
+              Close
+            </button>
+          }
+        >
+          <div className="space-y-5 px-5 py-5">
+            <section>
+              <label className="mb-2 block text-xs font-semibold uppercase tracking-wide text-muted-foreground">Direct Join Link</label>
+              <div className="flex gap-2">
+                <div className="flex h-12 min-w-0 flex-1 items-center rounded-xl border border-input bg-secondary/50 px-4 text-sm text-foreground truncate">{meetingLink}</div>
+                <button
+                  onClick={() => handleCopy(meetingLink, 'link')}
+                  aria-label="Copy meeting link"
+                  className={`flex h-12 min-w-16 items-center justify-center rounded-xl border px-4 text-sm font-semibold ${
+                    copied === 'link' ? 'border-success bg-success/10 text-success' : 'border-border text-foreground'
+                  }`}
+                >
+                  {copied === 'link' ? <Check className="h-4 w-4" /> : <Copy className="h-4 w-4" />}
+                </button>
+              </div>
+            </section>
+            <section>
+              <label className="mb-2 block text-xs font-semibold uppercase tracking-wide text-muted-foreground">Meeting ID</label>
+              <div className="flex gap-2">
+                <div className="flex h-12 min-w-0 flex-1 items-center rounded-xl border border-input bg-secondary/50 px-4 font-mono text-sm text-foreground">{meetingId}</div>
+                <button
+                  onClick={() => handleCopy(meetingId, 'id')}
+                  aria-label="Copy meeting id"
+                  className={`flex h-12 min-w-16 items-center justify-center rounded-xl border px-4 text-sm font-semibold ${
+                    copied === 'id' ? 'border-success bg-success/10 text-success' : 'border-border text-foreground'
+                  }`}
+                >
+                  {copied === 'id' ? <Check className="h-4 w-4" /> : <Copy className="h-4 w-4" />}
+                </button>
+              </div>
+            </section>
+            <section>
+              <label className="mb-2 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                <QrCode className="h-3.5 w-3.5" /> Scan to join
+              </label>
+              <div className="flex items-center justify-center rounded-2xl border border-border bg-secondary/30 p-5">
+                <img src={qrSrc} alt={`QR code for ${meetingLink}`} className="h-44 w-44 rounded-lg bg-white p-2" loading="lazy" />
+              </div>
+            </section>
+            <section>
+              <label className="mb-3 block text-xs font-semibold uppercase tracking-wide text-muted-foreground">Share via</label>
+              <div className="grid grid-cols-4 gap-3">
+                {shareOptions.map((opt) => (
+                  <button key={opt.label} onClick={opt.onClick} aria-label={`Share via ${opt.label}`} className="flex flex-col items-center gap-2 rounded-2xl p-2">
+                    <span className={`flex h-12 w-12 items-center justify-center rounded-2xl text-white ${opt.bg}`}>
+                      <opt.icon className="h-5 w-5" />
+                    </span>
+                    <span className="text-center text-[11px] font-medium leading-tight text-foreground">{opt.label}</span>
+                  </button>
+                ))}
+              </div>
+            </section>
+          </div>
+        </MobileModalShell>
+      )}
+
+      {active === 'shortcuts' && (
+        <MobileModalShell key="shortcuts" title="Keyboard Shortcuts" onClose={close}>
+          <div className="flex flex-col gap-2 p-4 pb-6">
+            {SHORTCUT_ITEMS.map((item) => (
+              <div key={item.key} className="flex items-center gap-3 rounded-2xl border border-border p-3">
+                <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-primary/10 text-primary">
+                  <item.icon className="h-5 w-5" />
+                </div>
+                <div className="min-w-0 flex-1">
+                  <p className="truncate text-sm font-semibold text-foreground">{item.label}</p>
+                  <p className="truncate text-xs text-muted-foreground">{item.desc}</p>
+                </div>
+                <kbd className="min-w-10 shrink-0 rounded-lg border border-border bg-secondary px-2.5 py-1.5 text-center font-mono text-xs font-bold text-foreground">
+                  {item.key}
+                </kbd>
+              </div>
+            ))}
+          </div>
+        </MobileModalShell>
+      )}
+
+      {active === 'screen-share-unsupported' && (
+        <MobileModalShell
+          key="ss-unsupported"
+          title="Screen Sharing"
+          onClose={close}
+          footer={
+            <button onClick={close} className="h-12 w-full rounded-2xl border border-border text-sm font-semibold text-foreground">
+              Cancel
+            </button>
+          }
+        >
+          <div className="flex flex-col gap-4 p-6">
+            <div className="flex h-16 w-16 items-center justify-center rounded-2xl bg-primary/10">
+              <Monitor className="h-8 w-8 text-primary" />
+            </div>
+            <p className="text-lg font-display font-bold text-foreground">
+              {isChromeDevtoolsEmulation() ? 'Responsive mode detected' : 'Screen sharing is not supported in this browser.'}
+            </p>
+            <p className="text-sm text-muted-foreground">
+              {isChromeDevtoolsEmulation()
+                ? 'Screen sharing cannot be fully tested in responsive mode. Please test on a real Android or iPhone device.'
+                : 'On mobile, only some browsers can share your screen. Try Chrome on Android, or join from a laptop.'}
+            </p>
+            <div className="grid gap-2 pt-2">
+              <a className="flex min-h-12 items-center justify-between rounded-xl border border-border px-4 text-sm font-semibold text-foreground" href="googlechrome://navigate?url=https://google.com">
+                Open in Chrome <ExternalLink className="h-4 w-4 text-muted-foreground" />
+              </a>
+              <a className="flex min-h-12 items-center justify-between rounded-xl border border-border px-4 text-sm font-semibold text-foreground" href="https://support.google.com/chrome/answer/9427052" target="_blank" rel="noopener noreferrer">
+                Learn More <ExternalLink className="h-4 w-4 text-muted-foreground" />
+              </a>
             </div>
           </div>
         </MobileModalShell>
