@@ -60,12 +60,27 @@ export function MeetingRoom() {
     const e2eWindow = window as typeof window & {
       __ZOOM_CONNECT_E2E__?: {
         addBreakoutParticipants: (names: string[]) => void;
+        assignAllToFirstRoom?: () => void;
       };
     };
 
     e2eWindow.__ZOOM_CONNECT_E2E__ = {
       addBreakoutParticipants: (names) => {
         names.forEach((name) => useMeetingStore.getState().addSimulatedParticipant(name));
+      },
+      assignAllToFirstRoom: () => {
+        const state = useMeetingStore.getState();
+        const rooms = state.breakoutRooms.length
+          ? state.breakoutRooms
+          : [
+              { id: '1', name: 'Room 1', participantIds: [] as string[] },
+              { id: '2', name: 'Room 2', participantIds: [] as string[] },
+            ];
+        const [first, ...rest] = rooms;
+        state.setBreakoutRooms([
+          { ...first, participantIds: state.participants.map((p) => p.id) },
+          ...rest.map((r) => ({ ...r, participantIds: [] as string[] })),
+        ]);
       },
     };
 
