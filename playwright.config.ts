@@ -13,5 +13,9 @@ export default createLovableConfig({
     { name: "chromium", use: { ...devices["Desktop Chrome"] } },
     { name: "firefox",  use: { ...devices["Desktop Firefox"] } },
     { name: "webkit",   use: { ...devices["Desktop Safari"]  } },
+    // Additional device emulations for Breakout Rooms visual/interaction runs
+    { name: "iphone-13",     use: { ...devices["iPhone 13"] } },
+    { name: "desktop-1280",  use: { ...devices["Desktop Chrome"], viewport: { width: 1280, height: 800 } } },
+    { name: "desktop-1920",  use: { ...devices["Desktop Chrome"], viewport: { width: 1920, height: 1080 } } },
   ],
 });
