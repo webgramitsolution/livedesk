@@ -1,0 +1,1 @@
+DROP FUNCTION IF EXISTS public.cleanup_expired_meeting_join_requests(text, uuid);
