@@ -193,16 +193,31 @@ test.describe('Breakout Rooms modal', () => {
     expect.soft(dx, 'horizontal center delta').toBeLessThanOrEqual(3);
   };
 
-  for (const zoom of [0.5, 0.75, 1, 1.25]) {
-    test(`stays centered without horizontal overflow at zoom ${zoom}x`, async ({ page }) => {
-      await page.setViewportSize({ width: 1440, height: 900 });
-      await page.goto('/');
-      await page.evaluate((z) => {
-        (document.body.style as CSSStyleDeclaration & { zoom?: string }).zoom = String(z);
-      }, zoom);
-      await openBreakout(page);
-      await assertModalOk(page);
-    });
+  const ZOOMS = [0.5, 0.67, 0.75, 0.9, 1, 1.1, 1.25];
+  for (const zoom of ZOOMS) {
+    for (const panel of ['none', 'Chat', 'AI Sidebar', 'Participants'] as const) {
+      test(`stays centered without overflow at zoom ${zoom}x (panel: ${panel})`, async ({ page }) => {
+        await page.setViewportSize({ width: 1440, height: 900 });
+        await page.goto('/');
+        await page.evaluate((z) => {
+          (document.body.style as CSSStyleDeclaration & { zoom?: string }).zoom = String(z);
+        }, zoom);
+        if (panel !== 'none') {
+          const btn = page.getByRole('button', { name: panel }).first();
+          if (await btn.isVisible().catch(() => false)) await btn.click();
+        }
+        await openBreakout(page);
+        await assertModalOk(page);
+
+        // Bounding-box constraint asserts: width <= viewport, height <= 85dvh
+        const dialog = page.getByRole('dialog', { name: 'Breakout Rooms' });
+        const box = await dialog.boundingBox();
+        const vp = page.viewportSize()!;
+        if (!box) throw new Error('no box');
+        expect.soft(box.width, 'width within viewport').toBeLessThanOrEqual(vp.width);
+        expect.soft(box.height, 'height within 85dvh cap').toBeLessThanOrEqual(vp.height * 0.85 + 4);
+      });
+    }
   }
 
   for (const panel of ['Chat', 'AI Sidebar', 'Participants']) {
