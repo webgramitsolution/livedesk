@@ -13,6 +13,7 @@ import { MeetingPresenceManager } from './MeetingPresenceManager';
 import { JoinRequestNotifier } from './JoinRequestNotifier';
 import { PerformanceHud } from './PerformanceHud';
 import { AlignmentDebugOverlay } from './AlignmentDebugOverlay';
+import { MobileSubmenus } from './MobileSubmenus';
 import { useSwipeGesture } from '@/hooks/useSwipeGesture';
 import { useIsMobile } from '@/hooks/use-mobile';
 import { useWebRTC } from '@/hooks/useWebRTC';
@@ -130,6 +131,7 @@ export function MeetingRoom() {
       <JoinRequestNotifier />
       <PerformanceHud getPeerStats={getPeerStats} />
       <AlignmentDebugOverlay />
+      <MobileSubmenus />
 
       {/* Recording download prompt after meeting */}
       {recordingBlob && screen === 'lobby' && (
