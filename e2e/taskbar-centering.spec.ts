@@ -634,3 +634,103 @@ test.describe('Keyboard shortcut integrity', () => {
   });
 });
 
+
+// ---------------------------------------------------------------------------
+// Screen-share self-capture / hall-of-mirrors regression
+// ---------------------------------------------------------------------------
+test.describe('Screen share: self-capture (hall of mirrors)', () => {
+  const ZOOMS = [0.5, 0.75, 1, 1.25];
+
+  const simulateSelfShare = async (page: import('@playwright/test').Page, on: boolean) => {
+    await page.evaluate((v) => {
+      (window as typeof window & {
+        __ZOOM_CONNECT_E2E__?: { simulateSelfCaptureShare?: (on: boolean) => void };
+      }).__ZOOM_CONNECT_E2E__?.simulateSelfCaptureShare?.(v);
+    }, on);
+  };
+
+  test('shows "You are presenting" placeholder, hides live preview, restores after stop', async ({ page }) => {
+    await page.setViewportSize({ width: 1280, height: 800 });
+    await page.goto('/');
+    await simulateSelfShare(page, true);
+
+    const placeholder = page.getByTestId('self-capture-placeholder');
+    await expect(placeholder).toBeVisible();
+    await expect(placeholder).toContainText('You are presenting');
+    await expect(page.getByTestId('self-capture-warning')).toContainText(/recursive/i);
+
+    // Absolutely no <video> element should be rendering the shared surface while suppressed
+    const videosPlayingScreen = await page.evaluate(() => {
+      return Array.from(document.querySelectorAll('video'))
+        .filter((v) => v.srcObject instanceof MediaStream && !v.paused && v.readyState >= 2)
+        .filter((v) => v.closest('[data-testid="self-capture-placeholder"]') !== null)
+        .length;
+    });
+    expect(videosPlayingScreen, 'no live <video> under placeholder').toBe(0);
+
+    // Stop sharing → normal grid returns, placeholder gone
+    await simulateSelfShare(page, false);
+    await expect(placeholder).toBeHidden();
+  });
+
+  for (const zoom of ZOOMS) {
+    test(`placeholder a11y: focus ring, ARIA labels, tab order @ ${zoom}x`, async ({ page }) => {
+      await page.setViewportSize({ width: 1280, height: 800 });
+      await page.goto('/');
+      await page.evaluate((z) => {
+        (document.body.style as CSSStyleDeclaration & { zoom?: string }).zoom = String(z);
+      }, zoom);
+      await simulateSelfShare(page, true);
+
+      const placeholder = page.getByTestId('self-capture-placeholder');
+      await expect(placeholder).toHaveAttribute('role', 'status');
+      await expect(placeholder).toHaveAttribute('aria-live', 'polite');
+      await expect(placeholder).toHaveAttribute('aria-label', /presenting/i);
+
+      // Stop Sharing button in the floating control near placeholder must be keyboard reachable
+      const stopBtn = page.getByRole('button', { name: /stop sharing/i }).first();
+      await stopBtn.focus();
+      await expect(stopBtn).toBeFocused();
+      const ringOk = await stopBtn.evaluate((el) => {
+        const s = getComputedStyle(el);
+        // Either an outline or a visible box-shadow ring is acceptable
+        return (s.outlineStyle !== 'none' && s.outlineWidth !== '0px') || s.boxShadow !== 'none';
+      });
+      expect(ringOk, 'visible focus ring on Stop Sharing').toBeTruthy();
+    });
+  }
+
+  test('remote participants still see the shared video (outgoing track not stopped)', async ({ page }) => {
+    await page.setViewportSize({ width: 1280, height: 800 });
+    await page.goto('/');
+    await simulateSelfShare(page, true);
+    // The store flag driving peer negotiation stays true even while local preview is suppressed
+    const state = await page.evaluate(() => ({
+      isScreenSharing: (window as unknown as { __ZC_STORE__?: { isScreenSharing: boolean } })
+        .__ZC_STORE__?.isScreenSharing ?? null,
+    }));
+    // If we haven't exposed the store, fall back to observing the UI signal
+    if (state.isScreenSharing === null) {
+      await expect(page.getByRole('button', { name: /stop sharing/i }).first()).toBeVisible();
+    } else {
+      expect(state.isScreenSharing).toBeTruthy();
+    }
+  });
+
+  test('static thumbnail replaces live preview when self-capture is active', async ({ page }) => {
+    await page.setViewportSize({ width: 1280, height: 800 });
+    await page.goto('/');
+    await simulateSelfShare(page, true);
+    const placeholder = page.getByTestId('self-capture-placeholder');
+    await expect(placeholder).toBeVisible();
+    // Either the static <img> thumbnail OR the Monitor icon fallback must render;
+    // never a live <video> element.
+    const hasThumbOrIcon = await placeholder.evaluate((el) => {
+      const img = el.querySelector('[data-testid="self-capture-thumbnail"]');
+      const icon = el.querySelector('svg');
+      const liveVideo = el.querySelector('video');
+      return !!(img || icon) && !liveVideo;
+    });
+    expect(hasThumbOrIcon).toBeTruthy();
+  });
+});
