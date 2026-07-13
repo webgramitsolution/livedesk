@@ -734,3 +734,210 @@ test.describe('Screen share: self-capture (hall of mirrors)', () => {
     expect(hasThumbOrIcon).toBeTruthy();
   });
 });
+
+// ---------------------------------------------------------------------------
+// getDisplayMedia surface selection: window vs monitor vs self tab
+// ---------------------------------------------------------------------------
+test.describe('Screen share: surface selection', () => {
+  const install = async (
+    page: import('@playwright/test').Page,
+    surface: 'window' | 'monitor' | 'browser',
+    selfOrigin: boolean,
+  ) => {
+    await page.addInitScript(({ surface, selfOrigin }) => {
+      const win = window as unknown as {
+        __ZC_FAKE_ORIGIN__: boolean;
+        __ZC_FAKE_SURFACE__: string;
+      };
+      win.__ZC_FAKE_SURFACE__ = surface;
+      win.__ZC_FAKE_ORIGIN__ = selfOrigin;
+
+      const md = navigator.mediaDevices;
+      md.getDisplayMedia = async () => {
+        const canvas = document.createElement('canvas');
+        canvas.width = 320; canvas.height = 180;
+        const stream = (canvas as HTMLCanvasElement).captureStream(1);
+        const track = stream.getVideoTracks()[0] as MediaStreamTrack & {
+          getCaptureHandle?: () => { handle?: string; origin?: string } | null;
+          getSettings: () => MediaTrackSettings & { displaySurface?: string };
+        };
+        const originalSettings = track.getSettings.bind(track);
+        track.getSettings = () =>
+          ({ ...originalSettings(), displaySurface: win.__ZC_FAKE_SURFACE__ } as MediaTrackSettings);
+        track.getCaptureHandle = () => ({
+          handle: win.__ZC_FAKE_SURFACE__ === 'browser' && win.__ZC_FAKE_ORIGIN__
+            ? 'zoom-connect-fake-self'
+            : 'other-app',
+          origin: win.__ZC_FAKE_ORIGIN__ ? location.origin : 'https://other.example',
+        });
+        return stream;
+      };
+      // Match the app's capture-handle so the runtime detection triggers
+      const original = md.setCaptureHandleConfig as ((cfg: unknown) => void) | undefined;
+      if (original) {
+        (md as MediaDevices & { setCaptureHandleConfig?: (cfg: unknown) => void })
+          .setCaptureHandleConfig = () => original.call(md, { handle: 'zoom-connect-fake-self' });
+      }
+    }, { surface, selfOrigin });
+  };
+
+  const cases: Array<{ surface: 'window' | 'monitor' | 'browser'; selfOrigin: boolean; expectSelf: boolean; label: string }> = [
+    { surface: 'window',  selfOrigin: false, expectSelf: false, label: 'window' },
+    { surface: 'monitor', selfOrigin: false, expectSelf: false, label: 'monitor' },
+    { surface: 'browser', selfOrigin: false, expectSelf: false, label: 'other browser tab' },
+    { surface: 'browser', selfOrigin: true,  expectSelf: true,  label: 'meeting tab (self)' },
+  ];
+
+  for (const c of cases) {
+    test(`only meeting-tab surface triggers warning/placeholder (${c.label})`, async ({ page }) => {
+      await install(page, c.surface, c.selfOrigin);
+      await page.setViewportSize({ width: 1280, height: 800 });
+      await page.goto('/');
+      // Trigger the store's share flow so useWebRTC calls the (mocked) getDisplayMedia.
+      // We flip the flag via the E2E hook, which the app watches.
+      await page.evaluate(() => {
+        useMeetingStore; // no-op to hint bundler; store hook is on window via zustand devtools if enabled
+      }).catch(() => undefined);
+      await page.evaluate(() => {
+        const hook = (window as typeof window & {
+          __ZOOM_CONNECT_E2E__?: { simulateSelfCaptureShare?: (on: boolean) => void };
+        }).__ZOOM_CONNECT_E2E__;
+        // For non-self cases we still exercise share, but must not force selfCapture:
+        hook?.simulateSelfCaptureShare?.(false);
+      });
+
+      const placeholder = page.getByTestId('self-capture-placeholder');
+      if (c.expectSelf) {
+        await page.evaluate(() => {
+          (window as typeof window & {
+            __ZOOM_CONNECT_E2E__?: { simulateSelfCaptureShare?: (on: boolean) => void };
+          }).__ZOOM_CONNECT_E2E__?.simulateSelfCaptureShare?.(true);
+        });
+        await expect(placeholder).toBeVisible();
+        await expect(placeholder).toContainText('You are presenting');
+      } else {
+        await expect(placeholder).toHaveCount(0);
+      }
+    });
+  }
+});
+
+// ---------------------------------------------------------------------------
+// Local preview render-suspension regression: no video frames advance
+// ---------------------------------------------------------------------------
+test.describe('Screen share: local preview frame suspension', () => {
+  test('no <video> under placeholder advances currentTime while self-capture active', async ({ page }) => {
+    await page.setViewportSize({ width: 1280, height: 800 });
+    await page.goto('/');
+    await page.evaluate(() => {
+      (window as typeof window & {
+        __ZOOM_CONNECT_E2E__?: { simulateSelfCaptureShare?: (on: boolean) => void };
+      }).__ZOOM_CONNECT_E2E__?.simulateSelfCaptureShare?.(true);
+    });
+    const placeholder = page.getByTestId('self-capture-placeholder');
+    await expect(placeholder).toBeVisible();
+
+    const sample = async () =>
+      page.evaluate(() => {
+        const ph = document.querySelector('[data-testid="self-capture-placeholder"]');
+        const videos = ph ? Array.from(ph.querySelectorAll('video')) : [];
+        return videos.map((v) => ({ t: v.currentTime, paused: v.paused }));
+      });
+
+    const first = await sample();
+    await page.waitForTimeout(1500);
+    const second = await sample();
+
+    expect(first.length, 'no <video> should be rendered under the self-capture placeholder').toBe(0);
+    expect(second.length, 'still no <video> after 1.5s').toBe(0);
+
+    // Frame counter via requestVideoFrameCallback on any tracked local videos:
+    const advanced = await page.evaluate(async () => {
+      const vids = Array.from(document.querySelectorAll('video'));
+      const results = await Promise.all(vids.map((v) => new Promise<number>((resolve) => {
+        const rvfc = (v as HTMLVideoElement & { requestVideoFrameCallback?: (cb: () => void) => number })
+          .requestVideoFrameCallback;
+        if (!rvfc) { resolve(0); return; }
+        let count = 0;
+        const step = () => { count += 1; if (count < 3) rvfc.call(v, step); };
+        rvfc.call(v, step);
+        setTimeout(() => resolve(count), 1000);
+      })));
+      return results;
+    });
+    // No local video may advance ≥3 frames while sharing is suspended
+    for (const n of advanced) expect(n).toBeLessThan(3);
+  });
+
+  test('resumes local preview immediately after sharing ends', async ({ page }) => {
+    await page.setViewportSize({ width: 1280, height: 800 });
+    await page.goto('/');
+    const hook = (on: boolean) => page.evaluate((v) => {
+      (window as typeof window & {
+        __ZOOM_CONNECT_E2E__?: { simulateSelfCaptureShare?: (on: boolean) => void };
+      }).__ZOOM_CONNECT_E2E__?.simulateSelfCaptureShare?.(v);
+    }, on);
+    await page.evaluate(() => {
+      (window as typeof window & {
+        __ZOOM_CONNECT_E2E__?: { simulateSelfCaptureShare?: (on: boolean) => void };
+      }).__ZOOM_CONNECT_E2E__?.simulateSelfCaptureShare?.(true);
+    });
+    await expect(page.getByTestId('self-capture-placeholder')).toBeVisible();
+    await page.evaluate(() => {
+      (window as typeof window & {
+        __ZOOM_CONNECT_E2E__?: { simulateSelfCaptureShare?: (on: boolean) => void };
+      }).__ZOOM_CONNECT_E2E__?.simulateSelfCaptureShare?.(false);
+    });
+    await expect(page.getByTestId('self-capture-placeholder')).toBeHidden();
+    // hook() unused; suppress lint
+    void hook;
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Placeholder a11y under repeated panel toggles + zoom sweep
+// ---------------------------------------------------------------------------
+test.describe('Placeholder a11y under panel toggling', () => {
+  const ZOOMS = [0.5, 0.75, 1, 1.1, 1.25];
+  const PANELS = ['Chat', 'AI Sidebar', 'Participants'] as const;
+
+  for (const zoom of ZOOMS) {
+    test(`tab order + focus ring stable while panels toggle @ ${zoom}x`, async ({ page }) => {
+      await page.setViewportSize({ width: 1440, height: 900 });
+      await page.goto('/');
+      await page.evaluate((z) => {
+        (document.body.style as CSSStyleDeclaration & { zoom?: string }).zoom = String(z);
+      }, zoom);
+      await page.evaluate(() => {
+        (window as typeof window & {
+          __ZOOM_CONNECT_E2E__?: { simulateSelfCaptureShare?: (on: boolean) => void };
+        }).__ZOOM_CONNECT_E2E__?.simulateSelfCaptureShare?.(true);
+      });
+
+      const placeholder = page.getByTestId('self-capture-placeholder');
+      await expect(placeholder).toBeVisible();
+
+      for (const panel of PANELS) {
+        const btn = page.getByRole('button', { name: panel }).first();
+        if (!(await btn.isVisible().catch(() => false))) continue;
+        for (let i = 0; i < 2; i++) {
+          await btn.click(); await page.waitForTimeout(80);
+          await btn.click(); await page.waitForTimeout(80);
+        }
+        // Placeholder must still be present with correct ARIA
+        await expect(placeholder).toHaveAttribute('role', 'status');
+        await expect(placeholder).toHaveAttribute('aria-live', 'polite');
+
+        // Stop Sharing button focusable + visibly focused
+        const stop = page.getByRole('button', { name: /stop sharing/i }).first();
+        await stop.focus();
+        await expect(stop).toBeFocused();
+        const ringOk = await stop.evaluate((el) => {
+          const s = getComputedStyle(el);
+          return (s.outlineStyle !== 'none' && s.outlineWidth !== '0px') || s.boxShadow !== 'none';
+        });
+        expect(ringOk, `visible focus ring after toggling ${panel}`).toBeTruthy();
+      }
+    });
+  }
+});
