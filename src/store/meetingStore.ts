@@ -55,6 +55,7 @@ interface MeetingState {
   isMicOn: boolean;
   isCameraOn: boolean;
   isScreenSharing: boolean;
+  isSelfCapture: boolean;
   isRecording: boolean;
   recordingStartTime: number | null;
   meetingJoinedAt: number | null;
@@ -94,6 +95,7 @@ interface MeetingState {
   toggleMic: () => void;
   toggleCamera: () => void;
   toggleScreenShare: () => void;
+  setSelfCapture: (v: boolean) => void;
   toggleRecording: () => void;
   toggleTranslation: () => void;
   toggleNoiseCancellation: () => void;
