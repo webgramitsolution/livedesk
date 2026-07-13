@@ -123,19 +123,31 @@ export function VideoGrid({ localStream, remoteStreams, screenStream, remoteScre
         {/* Main screen share area */}
         <div className="flex-1 relative rounded-xl overflow-hidden bg-background min-h-0">
           {whiteboardActive && <WhiteboardOverlay onClose={() => setWhiteboardActive(false)} portalWindow={toolbarPortalWindow} />}
-          {activeScreenStream ? (
-            <ScreenShareVideo stream={activeScreenStream} isLocal={!!screenStream && !suppressLocalPreview} />
+          {activeScreenStream && !suppressLocalPreview ? (
+            <ScreenShareVideo stream={activeScreenStream} isLocal={!!screenStream} />
           ) : (
             <div
               className="w-full h-full bg-gradient-to-br from-muted to-muted/60 flex flex-col items-center justify-center gap-3"
               data-testid={suppressLocalPreview ? 'self-capture-placeholder' : 'screen-share-placeholder'}
+              role="status"
+              aria-live="polite"
+              aria-label={suppressLocalPreview ? 'You are presenting. Local preview suspended to prevent recursive capture.' : 'You are sharing your screen'}
             >
-              <Monitor className="w-16 h-16 text-primary/40" />
+              {suppressLocalPreview && thumbDataUrl ? (
+                <img
+                  src={thumbDataUrl}
+                  alt="Static presenter thumbnail"
+                  data-testid="self-capture-thumbnail"
+                  className="w-40 h-24 rounded-lg object-cover border border-border shadow-sm"
+                />
+              ) : (
+                <Monitor className="w-16 h-16 text-primary/40" aria-hidden="true" />
+              )}
               <span className="text-foreground text-base font-display font-bold">
                 {suppressLocalPreview ? 'You are presenting' : 'You are sharing your screen'}
               </span>
               {suppressLocalPreview && (
-                <span className="text-muted-foreground text-xs max-w-sm text-center px-4">
+                <span className="text-muted-foreground text-xs max-w-sm text-center px-4" data-testid="self-capture-warning">
                   Live preview is hidden here to prevent a recursive screen effect. Remote participants see your shared window normally.
                 </span>
               )}
