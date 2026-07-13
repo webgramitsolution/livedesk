@@ -314,7 +314,7 @@ export function LobbyScreen() {
         </div>
 
          {/* Right - Carousel */}
-        <div className="flex flex-col items-center gap-3 sm:gap-4 max-w-sm w-full order-first md:order-last">
+        <div className="flex flex-col items-center gap-3 sm:gap-4 max-w-sm w-full">
           <div className="w-40 h-40 sm:w-56 sm:h-56 md:w-64 md:h-64 lg:w-72 lg:h-72 rounded-full bg-muted flex items-center justify-center relative overflow-hidden">
             <AnimatePresence mode="wait">
               <motion.div
