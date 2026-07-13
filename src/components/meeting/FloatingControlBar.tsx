@@ -16,6 +16,14 @@ import {
   X,
   ChevronRight,
   MoreHorizontal,
+  PenSquare,
+  BarChart3,
+  Circle,
+  Image as ImageIcon,
+  UserPlus,
+  Activity,
+  Keyboard,
+  Info,
 } from 'lucide-react';
 import { useMeetingStore } from '@/store/meetingStore';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -112,6 +120,7 @@ export function FloatingControlBar() {
     unreadChats,
     participants,
     isControlBarCollapsed,
+    isRecording,
     toggleMic,
     toggleCamera,
     toggleScreenShare,
@@ -120,6 +129,8 @@ export function FloatingControlBar() {
     toggleSettings,
     toggleBreakoutRooms,
     toggleControlBarCollapsed,
+    toggleRecording,
+    toggleInvite,
     leaveMeeting,
   } = useMeetingStore();
 
@@ -208,38 +219,7 @@ export function FloatingControlBar() {
 
             {/* More menu on mobile, inline on desktop */}
             {isMobile ? (
-              <div className="relative">
-                <ControlButton icon={MoreHorizontal} label="More" active={showMore} onClick={() => setShowMore(!showMore)} compact />
-                <AnimatePresence>
-                  {showMore && (
-                    <motion.div
-                      initial={{ opacity: 0, y: 10, scale: 0.9 }}
-                      animate={{ opacity: 1, y: 0, scale: 1 }}
-                      exit={{ opacity: 0, y: 10, scale: 0.9 }}
-                      className="absolute bottom-14 right-0 bg-background border border-border rounded-2xl p-2 flex flex-col gap-1.5 control-bar-elevated min-w-[210px]"
-                    >
-                      {[
-                        { icon: BrainCircuit, label: 'AI Sidebar', onClick: () => { toggleRightPanel('ai'); setShowMore(false); }, highlight: rightPanel === 'ai' },
-                        { icon: Monitor, label: isScreenSharing ? 'Stop sharing' : 'Screen share', onClick: () => { toggleScreenShare(); setShowMore(false); }, highlight: isScreenSharing },
-                        { icon: LayoutGrid, label: 'Breakout Rooms', onClick: () => { toggleBreakoutRooms(); setShowMore(false); } },
-                        { icon: Settings, label: 'Settings', onClick: () => { toggleSettings(); setShowMore(false); } },
-                        { icon: X, label: 'Collapse', onClick: () => { toggleControlBarCollapsed(); setShowMore(false); } },
-                      ].map((item) => (
-                        <button
-                          key={item.label}
-                          onClick={item.onClick}
-                          className={`flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-colors w-full text-left ${
-                            item.highlight ? 'bg-primary/10 text-primary' : 'text-foreground hover:bg-muted'
-                          }`}
-                        >
-                          <item.icon className="w-4 h-4 shrink-0" />
-                          {item.label}
-                        </button>
-                      ))}
-                    </motion.div>
-                  )}
-                </AnimatePresence>
-              </div>
+              <ControlButton icon={MoreHorizontal} label="More" active={showMore} onClick={() => setShowMore(true)} compact />
             ) : (
               <>
                 <ControlButton icon={BrainCircuit} label="AI Sidebar" active={rightPanel === 'ai'} highlight={rightPanel === 'ai'} onClick={() => toggleRightPanel('ai')} />
@@ -252,6 +232,84 @@ export function FloatingControlBar() {
 
             <ControlButton icon={PhoneOff} label="Leave meeting" danger onClick={leaveMeeting} compact={isMobile} />
           </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Mobile "More" Bottom Sheet */}
+      <AnimatePresence>
+        {isMobile && showMore && (
+          <>
+            <motion.div
+              key="more-backdrop"
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              transition={{ duration: 0.2 }}
+              onClick={() => setShowMore(false)}
+              className="fixed inset-0 z-[70] bg-background/60 backdrop-blur-sm"
+              aria-hidden="true"
+            />
+            <motion.div
+              key="more-sheet"
+              role="dialog"
+              aria-label="More meeting options"
+              initial={{ y: '100%' }}
+              animate={{ y: 0 }}
+              exit={{ y: '100%' }}
+              transition={{ type: 'spring', damping: 30, stiffness: 300 }}
+              drag="y"
+              dragConstraints={{ top: 0, bottom: 0 }}
+              dragElastic={{ top: 0, bottom: 0.5 }}
+              onDragEnd={(_, info) => {
+                if (info.offset.y > 120 || info.velocity.y > 500) setShowMore(false);
+              }}
+              className="fixed inset-x-0 bottom-0 z-[71] h-[82vh] rounded-t-3xl border-t border-border bg-background shadow-2xl flex flex-col"
+            >
+              <div className="pt-3 pb-2 flex flex-col items-center shrink-0">
+                <div className="w-10 h-1.5 rounded-full bg-muted-foreground/30" />
+                <h2 className="mt-3 text-base font-semibold text-foreground">More options</h2>
+              </div>
+              <div className="flex-1 overflow-y-auto px-5 pb-8 pt-2">
+                <div className="grid grid-cols-4 gap-3">
+                  {[
+                    { icon: Settings, label: 'Settings', onClick: () => toggleSettings() },
+                    { icon: LayoutGrid, label: 'Breakout', onClick: () => toggleBreakoutRooms() },
+                    { icon: PenSquare, label: 'Whiteboard', onClick: () => toggleRightPanel('ai') },
+                    { icon: BarChart3, label: 'Polls', onClick: () => toggleRightPanel('ai') },
+                    { icon: Circle, label: isRecording ? 'Stop Rec' : 'Record', onClick: () => toggleRecording(), highlight: isRecording },
+                    { icon: ImageIcon, label: 'Background', onClick: () => toggleSettings() },
+                    { icon: UserPlus, label: 'Invite', onClick: () => toggleInvite() },
+                    { icon: Monitor, label: isScreenSharing ? 'Stop Share' : 'Share', onClick: () => toggleScreenShare(), highlight: isScreenSharing },
+                    { icon: BrainCircuit, label: 'AI Assistant', onClick: () => toggleRightPanel('ai'), highlight: rightPanel === 'ai' },
+                    { icon: Activity, label: 'Stats', onClick: () => {/* perf hud toggle */} },
+                    { icon: Keyboard, label: 'Shortcuts', onClick: () => {
+                      window.dispatchEvent(new KeyboardEvent('keydown', { key: '?', shiftKey: true }));
+                    } },
+                    { icon: Info, label: 'About', onClick: () => {} },
+                  ].map((item) => (
+                    <button
+                      key={item.label}
+                      onClick={() => { item.onClick(); setShowMore(false); }}
+                      className="flex flex-col items-center gap-2 rounded-2xl p-3 transition-colors hover:bg-muted active:bg-muted/70"
+                    >
+                      <span className={`flex h-12 w-12 items-center justify-center rounded-2xl ${
+                        item.highlight ? 'bg-primary text-primary-foreground' : 'bg-muted text-foreground'
+                      }`}>
+                        <item.icon className="w-5 h-5" />
+                      </span>
+                      <span className="text-[11px] font-medium text-foreground text-center leading-tight">{item.label}</span>
+                    </button>
+                  ))}
+                </div>
+                <button
+                  onClick={() => { setShowMore(false); leaveMeeting(); }}
+                  className="mt-6 w-full h-12 rounded-2xl bg-destructive text-destructive-foreground font-semibold flex items-center justify-center gap-2"
+                >
+                  <PhoneOff className="w-4 h-4" /> Leave Meeting
+                </button>
+              </div>
+            </motion.div>
+          </>
         )}
       </AnimatePresence>
     </>
