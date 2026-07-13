@@ -61,4 +61,39 @@ test.describe('Floating control bar centering', () => {
     await popup.goto('/?popout=1');
     await assertCentered(popup);
   });
+
+  // Rotation / orientation
+  for (const [portrait, landscape] of [
+    [{ w: 390, h: 780 }, { w: 780, h: 390 }],
+    [{ w: 820, h: 1180 }, { w: 1180, h: 820 }],
+  ] as const) {
+    test(`stays centered rotating ${portrait.w}x${portrait.h} → ${landscape.w}x${landscape.h}`, async ({ page }) => {
+      await page.setViewportSize({ width: portrait.w, height: portrait.h });
+      await page.goto('/');
+      await assertCentered(page);
+      await page.setViewportSize({ width: landscape.w, height: landscape.h });
+      await page.waitForTimeout(200);
+      await assertCentered(page);
+    });
+  }
+
+  // Right-side panels open/close should NOT shift the bar (it's viewport-fixed)
+  const PANEL_BUTTONS = ['Participants', 'AI Sidebar'];
+  for (const panel of PANEL_BUTTONS) {
+    test(`stays centered when ${panel} panel toggles`, async ({ page }) => {
+      await page.setViewportSize({ width: 1440, height: 900 });
+      await page.goto('/');
+      await assertCentered(page);
+      const btn = page.getByRole('button', { name: panel }).first();
+      if (await btn.isVisible().catch(() => false)) {
+        await btn.click();
+        await page.waitForTimeout(250);
+        await assertCentered(page);
+        await btn.click();
+        await page.waitForTimeout(250);
+        await assertCentered(page);
+      }
+    });
+  }
 });
+

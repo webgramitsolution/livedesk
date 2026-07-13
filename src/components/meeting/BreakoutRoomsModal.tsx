@@ -1,7 +1,7 @@
 import { X, Plus, Shuffle, Users, ArrowRight } from 'lucide-react';
 import { useMeetingStore, type Participant } from '@/store/meetingStore';
 import { motion, AnimatePresence } from 'framer-motion';
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
 
 interface BreakoutRoom {
@@ -64,12 +64,53 @@ export function BreakoutRoomsModal() {
 
   const getParticipant = (id: string) => participants.find((p) => p.id === id);
 
-  // Lock body scroll while open to prevent layout-driven shifts
+  const dialogRef = useRef<HTMLDivElement>(null);
+
+  // Lock body scroll, trap focus, handle Escape while open
   useEffect(() => {
     if (!showBreakoutRooms) return;
     const prev = document.body.style.overflow;
     document.body.style.overflow = 'hidden';
-    return () => { document.body.style.overflow = prev; };
+
+    const previouslyFocused = document.activeElement as HTMLElement | null;
+    // Move focus into the dialog
+    requestAnimationFrame(() => {
+      const focusable = dialogRef.current?.querySelector<HTMLElement>(
+        'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])'
+      );
+      focusable?.focus();
+    });
+
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        e.stopPropagation();
+        toggleBreakoutRooms();
+        return;
+      }
+      if (e.key !== 'Tab' || !dialogRef.current) return;
+      const focusables = Array.from(
+        dialogRef.current.querySelectorAll<HTMLElement>(
+          'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
+        )
+      ).filter((el) => !el.hasAttribute('aria-hidden'));
+      if (focusables.length === 0) return;
+      const first = focusables[0];
+      const last = focusables[focusables.length - 1];
+      const active = document.activeElement as HTMLElement | null;
+      if (e.shiftKey && active === first) {
+        e.preventDefault();
+        last.focus();
+      } else if (!e.shiftKey && active === last) {
+        e.preventDefault();
+        first.focus();
+      }
+    };
+    document.addEventListener('keydown', onKey);
+    return () => {
+      document.body.style.overflow = prev;
+      document.removeEventListener('keydown', onKey);
+      previouslyFocused?.focus?.();
+    };
   }, [showBreakoutRooms]);
 
   if (typeof document === 'undefined') return null;
@@ -95,7 +136,8 @@ export function BreakoutRoomsModal() {
             animate={{ opacity: 1, scale: 1, y: 0 }}
             exit={{ opacity: 0, scale: 0.95, y: 20 }}
             transition={{ type: 'spring', damping: 25, stiffness: 300 }}
-            className="relative flex flex-col overflow-hidden rounded-2xl border border-border bg-background control-bar-elevated w-full h-full max-w-[min(62rem,calc(100vw-1rem))] max-h-[min(40rem,calc(100dvh-1rem))] sm:max-w-[min(62rem,calc(100vw-2rem))] sm:max-h-[min(40rem,calc(100dvh-2rem))]"
+            ref={dialogRef}
+            className="relative flex flex-col overflow-hidden rounded-2xl border border-border bg-background control-bar-elevated w-full h-auto max-w-[min(32rem,calc(100vw-1rem))] max-h-[min(28rem,calc(100dvh-1rem))] sm:max-w-[min(32rem,calc(100vw-2rem))] sm:max-h-[min(28rem,calc(100dvh-2rem))]"
           >
             {/* Header */}
             <div className="flex items-center justify-between border-b border-border px-4 py-3 sm:px-5 sm:py-4">
