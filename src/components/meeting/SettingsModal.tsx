@@ -2,6 +2,8 @@ import { X, Languages, Mic, Speaker, Camera, Brain, ChevronDown, Image, Activity
 import { useMeetingStore } from '@/store/meetingStore';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Switch } from '@/components/ui/switch';
+import { useEffect, useRef } from 'react';
+import { createPortal } from 'react-dom';
 
 const LANGUAGES = [
   { value: 'en', label: 'English' },
@@ -101,31 +103,71 @@ export function SettingsModal() {
     showPerfHud, togglePerfHud,
   } = useMeetingStore();
 
-  return (
+  const dialogRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!isSettingsOpen) return;
+    const prevOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    const previouslyFocused = document.activeElement as HTMLElement | null;
+    requestAnimationFrame(() => {
+      dialogRef.current?.querySelector<HTMLElement>(
+        'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])'
+      )?.focus();
+    });
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') { e.stopPropagation(); toggleSettings(); return; }
+      if (e.key !== 'Tab' || !dialogRef.current) return;
+      const items = Array.from(dialogRef.current.querySelectorAll<HTMLElement>(
+        'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
+      ));
+      if (!items.length) return;
+      const first = items[0], last = items[items.length - 1];
+      const active = document.activeElement as HTMLElement | null;
+      if (e.shiftKey && active === first) { e.preventDefault(); last.focus(); }
+      else if (!e.shiftKey && active === last) { e.preventDefault(); first.focus(); }
+    };
+    document.addEventListener('keydown', onKey);
+    return () => {
+      document.body.style.overflow = prevOverflow;
+      document.removeEventListener('keydown', onKey);
+      previouslyFocused?.focus?.();
+    };
+  }, [isSettingsOpen, toggleSettings]);
+
+  if (typeof document === 'undefined') return null;
+
+  const modal = (
     <AnimatePresence>
       {isSettingsOpen && (
-        <>
-          {/* Backdrop */}
+        <div
+          className="fixed inset-0 z-[100] flex items-center justify-center p-4 sm:p-6"
+          role="dialog"
+          aria-modal="true"
+          aria-label="Meeting Settings"
+        >
           <motion.div
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
             onClick={toggleSettings}
-            className="fixed inset-0 bg-foreground/20 backdrop-blur-sm z-50"
+            className="absolute inset-0 bg-foreground/40 backdrop-blur-sm"
           />
-          {/* Modal */}
           <motion.div
             initial={{ opacity: 0, scale: 0.95, y: 20 }}
             animate={{ opacity: 1, scale: 1, y: 0 }}
             exit={{ opacity: 0, scale: 0.95, y: 20 }}
             transition={{ type: 'spring', damping: 25, stiffness: 300 }}
-            className="fixed inset-x-2 top-2 bottom-2 z-50 flex flex-col overflow-hidden rounded-2xl border border-border bg-background control-bar-elevated sm:inset-x-auto sm:left-1/2 sm:top-4 sm:bottom-4 sm:h-[min(90dvh,42rem)] sm:w-[min(94vw,64rem)] sm:-translate-x-1/2"
+            ref={dialogRef}
+            style={{ borderRadius: '20px' }}
+            className="relative flex flex-col overflow-hidden border border-border bg-background control-bar-elevated w-[calc(100vw-32px)] sm:w-[90vw] lg:w-full max-w-[850px] max-h-[85dvh]"
           >
             {/* Header */}
-            <div className="flex items-center justify-between border-b border-border px-4 py-3 sm:px-5 sm:py-4">
+            <div className="sticky top-0 z-10 flex items-center justify-between border-b border-border bg-background px-4 py-3 sm:px-5 sm:py-4">
               <h2 className="font-display font-bold text-foreground text-lg">Meeting Settings</h2>
               <button
                 onClick={toggleSettings}
+                aria-label="Close settings"
                 className="w-8 h-8 rounded-full flex items-center justify-center hover:bg-muted transition-colors text-muted-foreground"
               >
                 <X className="w-4 h-4" />
@@ -133,8 +175,8 @@ export function SettingsModal() {
             </div>
 
             {/* Content */}
-            <div className="flex-1 overflow-hidden px-4 py-3 sm:px-5 sm:py-4">
-              <div className="grid h-full gap-3 overflow-x-hidden overflow-y-auto pr-1 lg:gap-4">
+            <div className="flex-1 overflow-y-auto overflow-x-hidden px-4 py-3 sm:px-5 sm:py-4">
+              <div className="grid gap-3 lg:gap-4">
                 <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-2 xl:grid-cols-4">
                 <SelectField
                   icon={Languages}
@@ -235,7 +277,7 @@ export function SettingsModal() {
             </div>
 
             {/* Footer */}
-            <div className="border-t border-border px-4 py-3 sm:px-5 sm:py-4">
+            <div className="sticky bottom-0 z-10 border-t border-border bg-background px-4 py-3 sm:px-5 sm:py-4">
               <motion.button
                 whileTap={{ scale: 0.98 }}
                 onClick={toggleSettings}
@@ -245,8 +287,10 @@ export function SettingsModal() {
               </motion.button>
             </div>
           </motion.div>
-        </>
+        </div>
       )}
     </AnimatePresence>
   );
+
+  return createPortal(modal, document.body);
 }

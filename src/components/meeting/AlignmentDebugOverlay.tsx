@@ -48,13 +48,35 @@ function DebugOverlayInner() {
   };
 
   useEffect(() => {
+    // Throttle high-frequency events (resize/orientation) via rAF coalescing
+    // + trailing setTimeout, so logging never spams during drag-resize.
+    let resizeScheduled = false;
+    let lastResizeLog = 0;
+    const RESIZE_MIN_MS = 150;
     const onResize = () => {
-      const w = window.innerWidth;
-      const h = window.innerHeight;
-      setDims((d) => ({ ...d, w, h }));
-      push({ kind: 'resize', detail: `${w}×${h}` });
+      if (resizeScheduled) return;
+      resizeScheduled = true;
+      requestAnimationFrame(() => {
+        resizeScheduled = false;
+        const w = window.innerWidth;
+        const h = window.innerHeight;
+        setDims((d) => ({ ...d, w, h }));
+        const now = performance.now();
+        if (now - lastResizeLog >= RESIZE_MIN_MS) {
+          lastResizeLog = now;
+          push({ kind: 'resize', detail: `${w}×${h}` });
+        }
+      });
     };
-    const onOrient = () => push({ kind: 'orientation', detail: screen.orientation?.type ?? 'unknown' });
+    let orientScheduled = false;
+    const onOrient = () => {
+      if (orientScheduled) return;
+      orientScheduled = true;
+      requestAnimationFrame(() => {
+        orientScheduled = false;
+        push({ kind: 'orientation', detail: screen.orientation?.type ?? 'unknown' });
+      });
+    };
     let cleanupDpr: (() => void) | null = null;
     const listenDpr = () => {
       cleanupDpr?.();
@@ -121,12 +143,36 @@ function DebugOverlayInner() {
           border: '1px solid hsl(0 90% 55%)',
         }}
       />
-      <div className="absolute top-2 right-2 max-w-[280px] rounded-lg border border-border bg-background/95 p-2 text-[11px] font-mono text-foreground shadow-lg">
-        <div className="mb-1 font-bold">
+      <div className="pointer-events-auto absolute top-2 right-2 max-w-[280px] rounded-lg border border-border bg-background/95 p-2 text-[11px] font-mono text-foreground shadow-lg">
+        <div className="mb-1 flex items-center justify-between gap-2 font-bold">
+          <span>
           align-debug · {dims.w}×{dims.h} · dpr {dims.dpr.toFixed(2)}
           {delta !== null && (
             <span className={delta > 2 || delta < -2 ? 'text-destructive' : 'text-primary'}> · Δ {delta}px</span>
           )}
+          </span>
+          <button
+            type="button"
+            onClick={() => {
+              const payload = {
+                capturedAt: new Date().toISOString(),
+                userAgent: navigator.userAgent,
+                viewport: { w: dims.w, h: dims.h, dpr: dims.dpr },
+                currentDeltaPx: delta,
+                events: logRef.current,
+              };
+              const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
+              const url = URL.createObjectURL(blob);
+              const a = document.createElement('a');
+              a.href = url;
+              a.download = `align-debug-${Date.now()}.json`;
+              a.click();
+              URL.revokeObjectURL(url);
+            }}
+            className="rounded border border-border px-1.5 py-0.5 text-[10px] font-normal text-muted-foreground hover:bg-muted"
+          >
+            Save JSON
+          </button>
         </div>
         <div className="max-h-[220px] overflow-y-auto space-y-0.5 text-muted-foreground">
           {log.map((e, i) => (

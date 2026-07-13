@@ -1,5 +1,11 @@
 import { test, expect } from '../playwright-fixture';
 
+// This spec runs against whatever browser projects are configured in
+// playwright.config.ts. To exercise WebKit + Firefox add projects like:
+//   { name: 'firefox',  use: { ...devices['Desktop Firefox'] } }
+//   { name: 'webkit',   use: { ...devices['Desktop Safari']  } }
+// The assertions below are browser-agnostic and will run on each project.
+
 /**
  * Visual/positional regression: the floating control bar must remain
  * horizontally centered in the viewport at multiple sizes and zoom levels,

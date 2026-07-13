@@ -128,8 +128,34 @@ export function FloatingControlBar() {
   const isMobile = useIsMobile();
   useViewportSync();
   const myHandRaised = participants.find((p) => p.id === '1')?.handRaised ?? false;
+
+  // Keyboard shortcut: Ctrl/Cmd+/ focuses the taskbar (accessible entry point)
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.key === '/') {
+        const bar = document.querySelector<HTMLElement>('[data-testid="floating-control-bar"]');
+        const first = bar?.querySelector<HTMLElement>('button');
+        if (first) {
+          e.preventDefault();
+          first.focus();
+          const region = document.getElementById('control-bar-live');
+          if (region) region.textContent = 'Meeting controls focused. Use Tab to move.';
+        }
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, []);
+
   return (
     <>
+      {/* Announced region for screen readers */}
+      <div
+        id="control-bar-live"
+        role="status"
+        aria-live="polite"
+        className="sr-only"
+      />
       {showReactions && <ReactionBar />}
       <AnimatePresence mode="wait">
         {isControlBarCollapsed ? (
