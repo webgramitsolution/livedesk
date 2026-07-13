@@ -154,7 +154,7 @@ export function BreakoutRoomsModal() {
               </button>
             </div>
 
-             <div className="flex-1 overflow-hidden px-4 py-3 sm:px-5 sm:py-4">
+             <div className="flex min-h-0 flex-1 flex-col overflow-hidden px-4 py-3 sm:px-5 sm:py-4">
               {/* Actions */}
               {!breakoutActive && (
                  <div className="mb-4 flex flex-wrap gap-3" role="toolbar" aria-label="Breakout room actions">
@@ -168,7 +168,7 @@ export function BreakoutRoomsModal() {
               )}
 
               {/* Rooms */}
-              <div className="h-full overflow-x-hidden overflow-y-auto pr-1" data-testid="breakout-modal-body">
+              <div className="min-h-0 flex-1 overflow-x-hidden overflow-y-auto pr-1" data-testid="breakout-modal-body">
                 {!breakoutActive && unassigned.length > 0 ? (
                    <div className="mb-4 rounded-2xl bg-secondary/50 p-3">
                     <p className="mb-3 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Unassigned ({unassigned.length})</p>
