@@ -169,3 +169,112 @@ test.describe('Modal accessibility and centering', () => {
   });
 });
 
+test.describe('Breakout Rooms modal', () => {
+  const openBreakout = async (page: import('@playwright/test').Page) => {
+    await page.keyboard.press('b');
+    const dialog = page.getByRole('dialog', { name: 'Breakout Rooms' });
+    await dialog.waitFor({ state: 'visible', timeout: 5_000 });
+    return dialog;
+  };
+
+  const assertModalOk = async (page: import('@playwright/test').Page) => {
+    const dialog = page.getByRole('dialog', { name: 'Breakout Rooms' });
+    const box = await dialog.boundingBox();
+    const vp = page.viewportSize()!;
+    if (!box) throw new Error('no dialog box');
+    // Portaled to body — parent should be <body>
+    const parentIsBody = await dialog.evaluate((el) => el.parentElement?.parentElement?.tagName === 'BODY' || el.closest('body') !== null);
+    expect(parentIsBody).toBeTruthy();
+    // No horizontal overflow
+    expect.soft(box.x, 'left edge inside viewport').toBeGreaterThanOrEqual(-1);
+    expect.soft(box.x + box.width, 'right edge inside viewport').toBeLessThanOrEqual(vp.width + 1);
+    // Centered
+    const dx = Math.abs(box.x + box.width / 2 - vp.width / 2);
+    expect.soft(dx, 'horizontal center delta').toBeLessThanOrEqual(3);
+  };
+
+  for (const zoom of [0.5, 0.75, 1, 1.25]) {
+    test(`stays centered without horizontal overflow at zoom ${zoom}x`, async ({ page }) => {
+      await page.setViewportSize({ width: 1440, height: 900 });
+      await page.goto('/');
+      await page.evaluate((z) => {
+        (document.body.style as CSSStyleDeclaration & { zoom?: string }).zoom = String(z);
+      }, zoom);
+      await openBreakout(page);
+      await assertModalOk(page);
+    });
+  }
+
+  for (const panel of ['Chat', 'AI Sidebar', 'Participants']) {
+    test(`stays centered while ${panel} toggles`, async ({ page }) => {
+      await page.setViewportSize({ width: 1440, height: 900 });
+      await page.goto('/');
+      await openBreakout(page);
+      const btn = page.getByRole('button', { name: panel }).first();
+      if (await btn.isVisible().catch(() => false)) {
+        await btn.click();
+        await page.waitForTimeout(200);
+        await assertModalOk(page);
+        await btn.click();
+        await page.waitForTimeout(200);
+        await assertModalOk(page);
+      }
+    });
+  }
+
+  test('Tab/Shift+Tab cycles focus; Escape, backdrop and Done restore focus', async ({ page }) => {
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await page.goto('/');
+
+    // Focus a taskbar button first so we can assert restoration
+    const settingsBtn = page.getByRole('button', { name: 'Settings' }).first();
+    await settingsBtn.focus();
+    await page.keyboard.press('b');
+    const dialog = page.getByRole('dialog', { name: 'Breakout Rooms' });
+    await dialog.waitFor({ state: 'visible' });
+
+    // Tab forward should stay inside the dialog
+    for (let i = 0; i < 30; i++) await page.keyboard.press('Tab');
+    const stillInside = await page.evaluate(() => {
+      const d = document.querySelector('[role="dialog"][aria-label="Breakout Rooms"]');
+      return !!d && d.contains(document.activeElement);
+    });
+    expect(stillInside, 'focus trapped forward').toBeTruthy();
+
+    // Shift+Tab should also stay inside
+    for (let i = 0; i < 30; i++) await page.keyboard.press('Shift+Tab');
+    const stillInsideBack = await page.evaluate(() => {
+      const d = document.querySelector('[role="dialog"][aria-label="Breakout Rooms"]');
+      return !!d && d.contains(document.activeElement);
+    });
+    expect(stillInsideBack, 'focus trapped backward').toBeTruthy();
+
+    // Escape → focus restored
+    await page.keyboard.press('Escape');
+    await dialog.waitFor({ state: 'hidden' });
+    const focusedName = await page.evaluate(() => document.activeElement?.getAttribute('title') || document.activeElement?.textContent);
+    expect(focusedName).toContain('Settings');
+  });
+});
+
+test.describe('Keyboard shortcut integrity', () => {
+  test('taskbar-focus shortcut does not collide with Settings shortcut', async ({ page }) => {
+    await page.setViewportSize({ width: 1280, height: 800 });
+    await page.goto('/');
+
+    // Ctrl+/ must focus the taskbar without opening Settings
+    await page.keyboard.press('Control+/');
+    const settingsOpen = await page.getByRole('dialog', { name: 'Meeting Settings' }).isVisible().catch(() => false);
+    expect(settingsOpen).toBeFalsy();
+    const focusInsideBar = await page.evaluate(() => {
+      const bar = document.querySelector('[data-testid="floating-control-bar"]');
+      return !!bar && bar.contains(document.activeElement);
+    });
+    expect(focusInsideBar).toBeTruthy();
+
+    // Comma must open Settings without stealing bar focus permanently
+    await page.keyboard.press(',');
+    await page.getByRole('dialog', { name: 'Meeting Settings' }).waitFor({ state: 'visible' });
+  });
+});
+

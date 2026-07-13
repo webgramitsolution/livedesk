@@ -137,7 +137,7 @@ export function BreakoutRoomsModal() {
             exit={{ opacity: 0, scale: 0.95, y: 20 }}
             transition={{ type: 'spring', damping: 25, stiffness: 300 }}
             ref={dialogRef}
-            className="relative flex flex-col overflow-hidden rounded-2xl border border-border bg-background control-bar-elevated w-[calc(100vw-24px)] sm:w-[90vw] lg:w-full max-w-[52rem] max-h-[85dvh]"
+            className="relative flex flex-col overflow-hidden rounded-2xl border border-border bg-background control-bar-elevated w-[calc(100vw-24px)] sm:w-[92vw] lg:w-full max-w-[64rem] max-h-[min(32rem,85dvh)]"
           >
             {/* Header */}
             <div className="flex items-center justify-between border-b border-border px-4 py-3 sm:px-5 sm:py-4">
@@ -184,7 +184,7 @@ export function BreakoutRoomsModal() {
 
                  <div className="grid gap-3 xl:grid-cols-2 xl:auto-rows-fr">
                   {localRooms.map((room) => (
-                <div key={room.id} className="min-h-[15rem] rounded-xl border border-border p-3">
+                <div key={room.id} className="rounded-xl border border-border p-3">
                   <div className="flex items-center justify-between mb-3">
                     <h3 className="font-display font-bold text-sm text-foreground">{room.name}</h3>
                     {!breakoutActive && localRooms.length > 1 && (
