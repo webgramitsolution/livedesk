@@ -392,6 +392,225 @@ test.describe('Breakout Rooms modal', () => {
     const focusedName = await page.evaluate(() => document.activeElement?.getAttribute('title') || document.activeElement?.textContent);
     expect(focusedName).toContain('Settings');
   });
+
+  // --- Sticky Start Breakout Sessions button ---
+  for (const zoom of BREAKOUT_ZOOMS) {
+    test(`Start Breakout Sessions button stays sticky & clickable while participant list scrolls at ${zoom}x`, async ({ page }) => {
+      await page.setViewportSize({ width: 1440, height: 900 });
+      await page.goto('/');
+      await seedBreakoutParticipants(page);
+      await page.evaluate(() => {
+        (window as typeof window & {
+          __ZOOM_CONNECT_E2E__?: { assignAllToFirstRoom?: () => void };
+        }).__ZOOM_CONNECT_E2E__?.assignAllToFirstRoom?.();
+      });
+      await page.evaluate((z) => {
+        (document.body.style as CSSStyleDeclaration & { zoom?: string }).zoom = String(z);
+      }, zoom);
+
+      await openBreakout(page);
+
+      const startBtn = page.getByTestId('breakout-start-button');
+      const footer = page.getByTestId('breakout-modal-footer');
+      const list = page.locator('[data-testid="breakout-participant-list"]').first();
+
+      // Sticky before scroll
+      await expect(startBtn).toBeVisible();
+      const dialog = page.getByRole('dialog', { name: 'Breakout Rooms' });
+      const beforeBox = await footer.boundingBox();
+      const dialogBox = await dialog.boundingBox();
+      if (!beforeBox || !dialogBox) throw new Error('no box');
+      // Footer should sit near the bottom of the dialog
+      expect.soft(dialogBox.y + dialogBox.height - (beforeBox.y + beforeBox.height))
+        .toBeLessThanOrEqual(2);
+
+      // Scroll the participant list to the bottom
+      await list.evaluate((el) => { el.scrollTop = el.scrollHeight; });
+      await page.waitForTimeout(50);
+
+      const afterBox = await footer.boundingBox();
+      if (!afterBox) throw new Error('no box');
+      expect.soft(Math.abs(afterBox.y - beforeBox.y), 'sticky footer must not shift on scroll')
+        .toBeLessThanOrEqual(2);
+
+      // Must remain clickable (not covered / not disabled)
+      await expect(startBtn).toBeVisible();
+      await expect(startBtn).toBeEnabled();
+      await startBtn.click({ trial: true });
+    });
+  }
+
+  // --- Participant list scroll threshold (>5) ---
+  test('participants area is not scrollable at ≤5 names and becomes scrollable past 5', async ({ page }) => {
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await page.goto('/');
+
+    // Seed exactly 5, assign to Room 1
+    await page.evaluate(() => {
+      const hook = (window as typeof window & {
+        __ZOOM_CONNECT_E2E__?: {
+          addBreakoutParticipants?: (n: string[]) => void;
+          assignAllToFirstRoom?: () => void;
+        };
+      }).__ZOOM_CONNECT_E2E__;
+      hook?.addBreakoutParticipants?.(['A', 'B', 'C', 'D', 'E']);
+      hook?.assignAllToFirstRoom?.();
+    });
+
+    await openBreakout(page);
+    const list = page.locator('[data-testid="breakout-participant-list"]').first();
+    const notScrollable = await list.evaluate((el) => el.scrollHeight <= el.clientHeight + 1);
+    expect(notScrollable, 'list should not scroll with 5 or fewer chips').toBeTruthy();
+
+    // Add many more so total > 5
+    await page.evaluate(() => {
+      const hook = (window as typeof window & {
+        __ZOOM_CONNECT_E2E__?: {
+          addBreakoutParticipants?: (n: string[]) => void;
+          assignAllToFirstRoom?: () => void;
+        };
+      }).__ZOOM_CONNECT_E2E__;
+      hook?.addBreakoutParticipants?.(['F', 'G', 'H', 'I', 'J', 'K', 'L', 'M']);
+      hook?.assignAllToFirstRoom?.();
+    });
+    await page.waitForTimeout(100);
+
+    const isScrollable = await list.evaluate((el) => el.scrollHeight > el.clientHeight + 1);
+    expect(isScrollable, 'list should scroll once past 5 chips').toBeTruthy();
+  });
+
+  // --- Chip truncation at common zoom levels ---
+  for (const zoom of BREAKOUT_ZOOMS) {
+    test(`participant chips always ellipsis-truncate inside card at ${zoom}x`, async ({ page }) => {
+      await page.setViewportSize({ width: 1440, height: 900 });
+      await page.goto('/');
+      await seedBreakoutParticipants(page);
+      await page.evaluate(() => {
+        (window as typeof window & {
+          __ZOOM_CONNECT_E2E__?: { assignAllToFirstRoom?: () => void };
+        }).__ZOOM_CONNECT_E2E__?.assignAllToFirstRoom?.();
+      });
+      await page.evaluate((z) => {
+        (document.body.style as CSSStyleDeclaration & { zoom?: string }).zoom = String(z);
+      }, zoom);
+
+      await openBreakout(page);
+
+      const violations = await page.evaluate(() => {
+        const chips = Array.from(document.querySelectorAll<HTMLElement>('[data-testid="breakout-participant-chip"]'));
+        const bad: Array<{ i: number; reason: string }> = [];
+        chips.forEach((chip, i) => {
+          const card = chip.closest<HTMLElement>('[data-testid="breakout-room-card"]');
+          const chipR = chip.getBoundingClientRect();
+          const cardR = card?.getBoundingClientRect();
+          if (chip.scrollWidth > chip.clientWidth + 1) bad.push({ i, reason: 'chip content overflows' });
+          if (cardR && (chipR.right > cardR.right + 1 || chipR.left < cardR.left - 1)) {
+            bad.push({ i, reason: 'chip escapes card horizontally' });
+          }
+          const nameSpan = chip.querySelector<HTMLElement>('span.truncate');
+          if (nameSpan) {
+            const style = getComputedStyle(nameSpan);
+            if (style.textOverflow !== 'ellipsis' || style.whiteSpace !== 'nowrap') {
+              bad.push({ i, reason: `missing ellipsis truncation (${style.textOverflow}/${style.whiteSpace})` });
+            }
+          }
+        });
+        return bad;
+      });
+      expect(violations, `chip truncation issues: ${JSON.stringify(violations)}`).toEqual([]);
+    });
+  }
+
+  // --- Keyboard navigation across Auto-assign / Add Room / Remove ---
+  test('keyboard navigation reaches Auto-assign, Add Room, and Remove without losing focus under zoom', async ({ page }) => {
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await page.goto('/');
+    await page.evaluate(() => {
+      (document.body.style as CSSStyleDeclaration & { zoom?: string }).zoom = '1.25';
+    });
+    await openBreakout(page);
+
+    const dialog = page.getByRole('dialog', { name: 'Breakout Rooms' });
+    const focusInside = async () =>
+      dialog.evaluate((el) => el.contains(document.activeElement));
+
+    // Tab until we land on Auto-assign, then activate
+    let landed = false;
+    for (let i = 0; i < 20; i++) {
+      await page.keyboard.press('Tab');
+      expect(await focusInside(), `focus stayed inside dialog after Tab #${i + 1}`).toBeTruthy();
+      const label = await page.evaluate(() => document.activeElement?.textContent?.trim());
+      if (label?.includes('Auto-assign')) { landed = true; break; }
+    }
+    expect(landed, 'reached Auto-assign via Tab').toBeTruthy();
+    await page.keyboard.press('Enter');
+
+    // Continue tabbing to Add Room and activate to create a removable room
+    landed = false;
+    for (let i = 0; i < 20; i++) {
+      await page.keyboard.press('Tab');
+      expect(await focusInside(), `focus stayed inside dialog while seeking Add Room #${i + 1}`).toBeTruthy();
+      const label = await page.evaluate(() => document.activeElement?.textContent?.trim());
+      if (label?.includes('Add Room')) { landed = true; break; }
+    }
+    expect(landed, 'reached Add Room via Tab').toBeTruthy();
+    await page.keyboard.press('Enter');
+    await page.keyboard.press('Enter'); // add another so Remove buttons render
+
+    // Find a Remove button via keyboard and activate it
+    landed = false;
+    for (let i = 0; i < 60; i++) {
+      await page.keyboard.press('Tab');
+      expect(await focusInside(), `focus stayed inside dialog while seeking Remove #${i + 1}`).toBeTruthy();
+      const label = await page.evaluate(() => document.activeElement?.textContent?.trim());
+      if (label === 'Remove') { landed = true; break; }
+    }
+    expect(landed, 'reached Remove via Tab').toBeTruthy();
+
+    const beforeCount = await page.locator('[data-testid="breakout-room-card"]').count();
+    await page.keyboard.press('Enter');
+    await page.waitForTimeout(100);
+    const afterCount = await page.locator('[data-testid="breakout-room-card"]').count();
+    expect(afterCount).toBe(beforeCount - 1);
+    expect(await focusInside(), 'focus remained inside dialog after Remove').toBeTruthy();
+  });
+
+  // --- Visual regression snapshots ---
+  for (const zoom of BREAKOUT_ZOOMS) {
+    for (const panel of BREAKOUT_PANELS) {
+      for (const mode of ['auto-assign', 'add-room'] as const) {
+        test(`visual: Breakout Rooms @ ${zoom}x, panel=${panel}, mode=${mode}`, async ({ page }, testInfo) => {
+          await page.setViewportSize({ width: 1440, height: 900 });
+          await page.goto('/');
+          await seedBreakoutParticipants(page);
+          await page.evaluate((z) => {
+            (document.body.style as CSSStyleDeclaration & { zoom?: string }).zoom = String(z);
+          }, zoom);
+          if (panel !== 'none') {
+            const btn = page.getByRole('button', { name: panel }).first();
+            if (await btn.isVisible().catch(() => false)) await btn.click();
+          }
+          await openBreakout(page);
+          const action = mode === 'auto-assign'
+            ? page.getByRole('button', { name: 'Auto-assign' })
+            : page.getByRole('button', { name: 'Add Room' });
+          await action.click();
+          await page.waitForTimeout(150);
+
+          const dialog = page.getByRole('dialog', { name: 'Breakout Rooms' });
+          const buf = await dialog.screenshot();
+          await testInfo.attach(`breakout-${zoom}x-${panel}-${mode}.png`, {
+            body: buf,
+            contentType: 'image/png',
+          });
+          await expect(dialog).toHaveScreenshot(
+            `breakout-${zoom}x-${panel}-${mode}.png`,
+            { maxDiffPixelRatio: 0.02 },
+          );
+        });
+      }
+    }
+  }
 });
 
 test.describe('Keyboard shortcut integrity', () => {
