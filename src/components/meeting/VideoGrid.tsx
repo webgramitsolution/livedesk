@@ -10,6 +10,7 @@ interface VideoGridProps {
   remoteStreams?: Map<string, MediaStream>;
   screenStream?: MediaStream | null;
   remoteScreenStream?: MediaStream | null;
+  isSelfCapture?: boolean;
 }
 
 function ScreenShareVideo({ stream, isLocal }: { stream: MediaStream; isLocal?: boolean }) {
@@ -35,13 +36,17 @@ function ScreenShareVideo({ stream, isLocal }: { stream: MediaStream; isLocal?: 
   );
 }
 
-export function VideoGrid({ localStream, remoteStreams, screenStream, remoteScreenStream }: VideoGridProps) {
+export function VideoGrid({ localStream, remoteStreams, screenStream, remoteScreenStream, isSelfCapture }: VideoGridProps) {
   const { participants, transcript, isTranslationEnabled, isScreenSharing, toggleScreenShare, selectedLanguage } =
     useMeetingStore();
   const [whiteboardActive, setWhiteboardActive] = useState(false);
   const [toolbarPortalWindow, setToolbarPortalWindow] = useState<Window | null>(null);
 
-  const activeScreenStream = screenStream || remoteScreenStream;
+  // Suppress the local live preview when the presenter is capturing this very tab,
+  // otherwise we render a "hall of mirrors" recursion. Remote peers still receive
+  // the outgoing track — only local rendering is replaced with a placeholder.
+  const suppressLocalPreview = !!(isSelfCapture && screenStream);
+  const activeScreenStream = suppressLocalPreview ? remoteScreenStream : (screenStream || remoteScreenStream);
 
   const TRANSLATED_SUBTITLES: Record<string, Record<string, string>> = {
     'Sarah Chen': { hi: 'मुझे Q4 से नवीनतम मेट्रिक्स साझा करने दें...', es: 'Permítanme compartir las últimas métricas del Q4...', fr: 'Permettez-moi de partager les dernières métriques du Q4...' },
@@ -90,11 +95,21 @@ export function VideoGrid({ localStream, remoteStreams, screenStream, remoteScre
         <div className="flex-1 relative rounded-xl overflow-hidden bg-background min-h-0">
           {whiteboardActive && <WhiteboardOverlay onClose={() => setWhiteboardActive(false)} portalWindow={toolbarPortalWindow} />}
           {activeScreenStream ? (
-            <ScreenShareVideo stream={activeScreenStream} isLocal={!!screenStream} />
+            <ScreenShareVideo stream={activeScreenStream} isLocal={!!screenStream && !suppressLocalPreview} />
           ) : (
-            <div className="w-full h-full bg-gradient-to-br from-muted to-muted/60 flex flex-col items-center justify-center gap-3">
+            <div
+              className="w-full h-full bg-gradient-to-br from-muted to-muted/60 flex flex-col items-center justify-center gap-3"
+              data-testid={suppressLocalPreview ? 'self-capture-placeholder' : 'screen-share-placeholder'}
+            >
               <Monitor className="w-16 h-16 text-primary/40" />
-              <span className="text-muted-foreground text-sm font-display">You are sharing your screen</span>
+              <span className="text-foreground text-base font-display font-bold">
+                {suppressLocalPreview ? 'You are presenting' : 'You are sharing your screen'}
+              </span>
+              {suppressLocalPreview && (
+                <span className="text-muted-foreground text-xs max-w-sm text-center px-4">
+                  Live preview is hidden here to prevent a recursive screen effect. Remote participants see your shared window normally.
+                </span>
+              )}
             </div>
           )}
           {isScreenSharing && (
