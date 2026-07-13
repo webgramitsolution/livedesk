@@ -59,6 +59,32 @@ const VIRTUAL_BACKGROUNDS = [
   { value: 'library', label: 'Library', preview: '📚' },
 ];
 
+const SHORTCUT_ITEMS = [
+  { icon: Mic, label: 'Microphone', desc: 'Mute / Unmute', key: 'M' },
+  { icon: Camera, label: 'Camera', desc: 'On / Off', key: 'V' },
+  { icon: Monitor, label: 'Screen Share', desc: 'Start / Stop', key: 'S' },
+  { icon: Hand, label: 'Raise Hand', desc: 'Toggle', key: 'H' },
+  { icon: Circle, label: 'Recording', desc: 'Start / Stop', key: 'R' },
+  { icon: MessageSquare, label: 'Chat', desc: 'Open panel', key: 'C' },
+  { icon: Users, label: 'Participants', desc: 'Open panel', key: 'P' },
+  { icon: LogOut, label: 'Leave Meeting', desc: 'Exit', key: 'Q' },
+];
+
+/** True when running in a real mobile browser (Android / iOS user agent). */
+export function isRealMobileDevice(): boolean {
+  if (typeof navigator === 'undefined') return false;
+  const ua = navigator.userAgent || '';
+  const uaMobile = /Android|iPhone|iPad|iPod|Mobile/i.test(ua);
+  const iPadOs = /Macintosh/.test(ua) && typeof document !== 'undefined' && 'ontouchend' in document;
+  return uaMobile || iPadOs;
+}
+
+/** True when viewport looks mobile but user agent is desktop (Chrome DevTools emulation). */
+export function isChromeDevtoolsEmulation(): boolean {
+  if (typeof window === 'undefined') return false;
+  return window.innerWidth < 768 && !isRealMobileDevice();
+}
+
 /**
  * Central mobile-only router for "More Options" submenus.
  * Ensures no centered desktop dialog opens when width < 768px — each submenu
