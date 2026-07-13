@@ -223,7 +223,7 @@ export function LobbyScreen() {
       {/* Main Content */}
       <main className="flex-1 flex flex-col md:flex-row items-center justify-center gap-8 md:gap-12 lg:gap-16 px-4 sm:px-8 py-8">
         {/* Left - Actions */}
-        <div className="flex flex-col items-center md:items-start gap-6 max-w-md w-full">
+        <div className="flex flex-col items-center md:items-start gap-6 w-full max-w-md md:max-w-lg">
           {extractMeetingCodeFromInput(searchParams.get('meeting')) && (
             <div className="w-full rounded-2xl border border-primary/20 bg-primary/5 p-4 text-left">
               <p className="font-display text-base font-bold text-foreground">You opened an invite link</p>
@@ -245,12 +245,12 @@ export function LobbyScreen() {
             </p>
           </div>
 
-          <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3 w-full">
+          <div className="flex flex-col lg:flex-row items-stretch lg:items-center gap-3 w-full">
             {/* New Meeting Button */}
             <div className="relative">
               <Button
                 onClick={() => setShowNewMenu(!showNewMenu)}
-                className="gap-2 rounded-xl px-6 py-3 h-auto font-display font-bold text-base w-full sm:w-auto"
+                className="gap-2 rounded-xl px-6 py-3 h-auto font-display font-bold text-base w-full lg:w-auto"
               >
                 <Plus className="w-5 h-5" />
                 New meeting
