@@ -1,7 +1,10 @@
-import { X, Keyboard } from 'lucide-react';
+import { X, Keyboard, Mic, Camera, Monitor, Hand, Circle, MessageSquare, Users, LogOut } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useEffect } from 'react';
 import { useMeetingStore } from '@/store/meetingStore';
+import { usePanelOverlayMode } from '@/hooks/use-mobile';
+import { MobileModalShell } from './MobileModalShell';
+import { createPortal } from 'react-dom';
 
 const SHORTCUTS = [
   { key: 'M', label: 'Toggle microphone' },
@@ -28,6 +31,47 @@ export function KeyboardShortcutsOverlay({
   isOpen: boolean;
   onClose: () => void;
 }) {
+  const overlayMode = usePanelOverlayMode();
+  const isMobile = overlayMode === 'mobile';
+
+  if (isMobile && typeof document !== 'undefined') {
+    const MOBILE_ITEMS = [
+      { icon: Mic, label: 'Microphone', desc: 'Mute / Unmute', key: 'M' },
+      { icon: Camera, label: 'Camera', desc: 'On / Off', key: 'V' },
+      { icon: Monitor, label: 'Screen Share', desc: 'Start / Stop', key: 'S' },
+      { icon: Hand, label: 'Raise Hand', desc: 'Toggle', key: 'H' },
+      { icon: Circle, label: 'Recording', desc: 'Start / Stop', key: 'R' },
+      { icon: MessageSquare, label: 'Chat', desc: 'Open panel', key: 'C' },
+      { icon: Users, label: 'Participants', desc: 'Open panel', key: 'P' },
+      { icon: LogOut, label: 'Leave Meeting', desc: 'Exit', key: 'Q' },
+    ];
+    return createPortal(
+      <AnimatePresence>
+        {isOpen && (
+          <MobileModalShell title="Keyboard Shortcuts" ariaLabel="Keyboard Shortcuts" onClose={onClose}>
+            <div className="flex flex-col gap-2 p-4 pb-6">
+              {MOBILE_ITEMS.map((item) => (
+                <div key={item.key} className="flex items-center gap-3 rounded-2xl border border-border p-3">
+                  <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-primary/10 text-primary">
+                    <item.icon className="h-5 w-5" />
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <p className="truncate text-sm font-semibold text-foreground">{item.label}</p>
+                    <p className="truncate text-xs text-muted-foreground">{item.desc}</p>
+                  </div>
+                  <kbd className="min-w-10 shrink-0 rounded-lg border border-border bg-secondary px-2.5 py-1.5 text-center font-mono text-xs font-bold text-foreground">
+                    {item.key}
+                  </kbd>
+                </div>
+              ))}
+            </div>
+          </MobileModalShell>
+        )}
+      </AnimatePresence>,
+      document.body,
+    );
+  }
+
   return (
     <AnimatePresence>
       {isOpen && (
