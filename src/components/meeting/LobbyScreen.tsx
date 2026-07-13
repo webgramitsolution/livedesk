@@ -237,7 +237,7 @@ export function LobbyScreen() {
           )}
 
           <div className="text-center md:text-left">
-            <h1 className="font-display font-bold text-2xl sm:text-4xl md:text-4xl text-foreground leading-tight">
+            <h1 className="font-display font-bold text-2xl sm:text-4xl md:text-4xl text-foreground leading-tight md:max-w-[18ch] lg:max-w-none">
               Video calls and meetings for everyone
             </h1>
             <p className="text-muted-foreground mt-3 text-sm sm:text-base">
