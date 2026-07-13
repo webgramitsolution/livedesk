@@ -10,7 +10,6 @@ interface VideoGridProps {
   remoteStreams?: Map<string, MediaStream>;
   screenStream?: MediaStream | null;
   remoteScreenStream?: MediaStream | null;
-  isSelfCapture?: boolean;
 }
 
 function ScreenShareVideo({ stream, isLocal }: { stream: MediaStream; isLocal?: boolean }) {
@@ -36,17 +35,47 @@ function ScreenShareVideo({ stream, isLocal }: { stream: MediaStream; isLocal?: 
   );
 }
 
-export function VideoGrid({ localStream, remoteStreams, screenStream, remoteScreenStream, isSelfCapture }: VideoGridProps) {
-  const { participants, transcript, isTranslationEnabled, isScreenSharing, toggleScreenShare, selectedLanguage } =
+export function VideoGrid({ localStream, remoteStreams, screenStream, remoteScreenStream }: VideoGridProps) {
+  const { participants, transcript, isTranslationEnabled, isScreenSharing, isSelfCapture, toggleScreenShare, selectedLanguage } =
     useMeetingStore();
   const [whiteboardActive, setWhiteboardActive] = useState(false);
   const [toolbarPortalWindow, setToolbarPortalWindow] = useState<Window | null>(null);
 
   // Suppress the local live preview when the presenter is capturing this very tab,
   // otherwise we render a "hall of mirrors" recursion. Remote peers still receive
-  // the outgoing track — only local rendering is replaced with a placeholder.
-  const suppressLocalPreview = !!(isSelfCapture && screenStream);
+  // the outgoing track — only local rendering is replaced with a static thumbnail.
+  const suppressLocalPreview = !!(isSelfCapture && isScreenSharing);
   const activeScreenStream = suppressLocalPreview ? remoteScreenStream : (screenStream || remoteScreenStream);
+
+  // Static thumbnail: capture ONE frame from the camera stream when we start
+  // suppressing the preview, so the "You are presenting" card shows a real
+  // presenter thumbnail (Zoom/Meet-style) instead of a spinning video.
+  const thumbCanvasRef = useRef<HTMLCanvasElement | null>(null);
+  const [thumbDataUrl, setThumbDataUrl] = useState<string | null>(null);
+  useEffect(() => {
+    if (!suppressLocalPreview) { setThumbDataUrl(null); return; }
+    if (!localStream) return;
+    const videoTrack = localStream.getVideoTracks()[0];
+    if (!videoTrack) return;
+    const el = document.createElement('video');
+    el.srcObject = localStream;
+    el.muted = true;
+    el.playsInline = true;
+    let cancelled = false;
+    el.play().then(() => {
+      if (cancelled) return;
+      const canvas = thumbCanvasRef.current ?? document.createElement('canvas');
+      thumbCanvasRef.current = canvas;
+      canvas.width = 320;
+      canvas.height = 180;
+      const ctx = canvas.getContext('2d');
+      ctx?.drawImage(el, 0, 0, canvas.width, canvas.height);
+      try { setThumbDataUrl(canvas.toDataURL('image/jpeg', 0.7)); } catch { /* tainted */ }
+      el.pause();
+      el.srcObject = null;
+    }).catch(() => undefined);
+    return () => { cancelled = true; el.pause(); el.srcObject = null; };
+  }, [suppressLocalPreview, localStream]);
 
   const TRANSLATED_SUBTITLES: Record<string, Record<string, string>> = {
     'Sarah Chen': { hi: 'मुझे Q4 से नवीनतम मेट्रिक्स साझा करने दें...', es: 'Permítanme compartir las últimas métricas del Q4...', fr: 'Permettez-moi de partager les dernières métriques du Q4...' },
