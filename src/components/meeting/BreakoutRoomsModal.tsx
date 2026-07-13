@@ -126,7 +126,7 @@ export function BreakoutRoomsModal() {
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
             onClick={toggleBreakoutRooms}
-            className="absolute inset-0 bg-foreground/30 backdrop-blur-sm"
+            className="absolute inset-0 bg-foreground/50 backdrop-blur-md"
           />
           <motion.div
             initial={{ opacity: 0, scale: 0.95, y: 20 }}
@@ -137,10 +137,11 @@ export function BreakoutRoomsModal() {
             role="dialog"
             aria-modal="true"
             aria-label="Breakout Rooms"
-            className="relative flex w-[calc(100vw-24px)] max-w-[80rem] flex-col overflow-hidden rounded-2xl border border-border bg-background control-bar-elevated sm:w-[92vw] lg:w-full max-h-[min(34rem,85dvh)]"
+            style={{ width: 'min(900px, 65vw, calc(100vw - 24px))' }}
+            className="relative flex flex-col overflow-hidden rounded-[18px] border border-border bg-background shadow-2xl md:min-w-[720px] max-w-[960px] max-h-[80vh] h-auto"
           >
             {/* Header */}
-            <div className="flex items-center justify-between border-b border-border px-4 py-3 sm:px-5 sm:py-4">
+            <div className="flex shrink-0 items-center justify-between border-b border-border px-5 py-3.5">
               <div className="flex items-center gap-2">
                 <Users className="w-5 h-5 text-primary" />
                 <h2 className="font-display font-bold text-foreground text-lg">Breakout Rooms</h2>
@@ -154,14 +155,14 @@ export function BreakoutRoomsModal() {
               </button>
             </div>
 
-             <div className="flex min-h-0 flex-1 flex-col overflow-hidden px-4 py-3 sm:px-5 sm:py-4">
+             <div className="flex min-h-0 flex-1 flex-col overflow-hidden px-5 py-4">
               {/* Actions */}
               {!breakoutActive && (
-                 <div className="mb-4 flex flex-wrap gap-3" role="toolbar" aria-label="Breakout room actions">
-                   <motion.button whileTap={{ scale: 0.95 }} onClick={shuffleAll} className="inline-flex min-h-11 shrink-0 items-center justify-center gap-2 whitespace-nowrap rounded-xl border border-border px-4 py-2 text-sm font-semibold text-foreground transition-colors hover:bg-muted">
+                 <div className="mb-4 flex shrink-0 items-center gap-2" role="toolbar" aria-label="Breakout room actions">
+                   <motion.button whileTap={{ scale: 0.95 }} onClick={shuffleAll} className="inline-flex h-9 shrink-0 items-center justify-center gap-2 whitespace-nowrap rounded-lg border border-border px-3 text-sm font-semibold text-foreground transition-colors hover:bg-muted">
                      <Shuffle className="h-4 w-4 shrink-0" /> <span>Auto-assign</span>
                   </motion.button>
-                   <motion.button whileTap={{ scale: 0.95 }} onClick={addRoom} className="inline-flex min-h-11 shrink-0 items-center justify-center gap-2 whitespace-nowrap rounded-xl border border-border px-4 py-2 text-sm font-semibold text-foreground transition-colors hover:bg-muted">
+                   <motion.button whileTap={{ scale: 0.95 }} onClick={addRoom} className="inline-flex h-9 shrink-0 items-center justify-center gap-2 whitespace-nowrap rounded-lg border border-border px-3 text-sm font-semibold text-foreground transition-colors hover:bg-muted">
                      <Plus className="h-4 w-4 shrink-0" /> <span>Add Room</span>
                   </motion.button>
                 </div>
@@ -170,9 +171,9 @@ export function BreakoutRoomsModal() {
               {/* Rooms */}
               <div className="min-h-0 flex-1 overflow-x-hidden overflow-y-auto pr-1" data-testid="breakout-modal-body">
                 {!breakoutActive && unassigned.length > 0 ? (
-                   <div className="mb-4 rounded-2xl bg-secondary/50 p-3">
-                    <p className="mb-3 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Unassigned ({unassigned.length})</p>
-                    <div className="grid max-h-28 grid-cols-[repeat(auto-fit,minmax(min(180px,100%),1fr))] gap-2 overflow-y-auto pr-1">
+                   <div className="mb-4 rounded-xl bg-secondary/50 p-3">
+                    <p className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Unassigned ({unassigned.length})</p>
+                    <div className="grid max-h-24 grid-cols-[repeat(auto-fit,minmax(min(160px,100%),1fr))] gap-2 overflow-y-auto pr-1">
                       {unassigned.map((p) => (
                         <div key={p.id} className="flex min-w-0 items-center gap-2 rounded-xl border border-border bg-background px-2 py-1.5 text-xs font-medium text-foreground">
                           <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-muted text-[9px] font-bold text-muted-foreground">{p.avatar}</span>
@@ -184,12 +185,11 @@ export function BreakoutRoomsModal() {
                 ) : null}
 
                  <div
-                   className="grid w-full gap-5"
+                   className="grid w-full grid-cols-1 gap-3 sm:grid-cols-2"
                    data-testid="breakout-room-grid"
-                   style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(min(260px, 100%), 1fr))' }}
                  >
                   {localRooms.map((room) => (
-                <div key={room.id} className="flex min-h-[220px] w-full min-w-0 flex-col rounded-2xl border border-border p-4" data-testid="breakout-room-card">
+                <div key={room.id} className="flex h-[180px] w-full min-w-0 flex-col rounded-[14px] border border-border p-3" data-testid="breakout-room-card">
                   <div className="mb-3 flex min-w-0 items-start justify-between gap-3">
                     <h3 className="min-w-0 flex-1 truncate font-display text-base font-bold leading-6 text-foreground" title={room.name}>{room.name}</h3>
                     {!breakoutActive && localRooms.length > 1 && (
@@ -197,18 +197,18 @@ export function BreakoutRoomsModal() {
                     )}
                   </div>
                   <div className="flex min-h-0 flex-1 flex-col">
-                    <div className="min-h-0 max-h-40 flex-1 space-y-2 overflow-y-auto pr-1" data-testid="breakout-participant-list">
+                    <div className="min-h-0 flex-1 space-y-1 overflow-y-auto pr-1" data-testid="breakout-participant-list">
                     {room.participantIds.map((pid) => {
                       const p = getParticipant(pid);
                       if (!p) return null;
                       return (
-                        <div key={pid} className="flex min-w-0 items-center justify-between gap-2 rounded-xl px-2 py-1.5 transition-colors hover:bg-muted/50" data-testid="breakout-participant-chip">
+                        <div key={pid} className="flex min-w-0 items-center justify-between gap-2 rounded-lg px-1.5 py-1 transition-colors hover:bg-muted/50" data-testid="breakout-participant-chip">
                           <div className="flex min-w-0 items-center gap-2">
-                            <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-primary/10 text-[10px] font-bold text-primary">{p.avatar}</span>
-                            <span className="min-w-0 truncate text-sm text-foreground" title={p.name}>{p.name}</span>
+                            <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-primary/10 text-[10px] font-bold text-primary">{p.avatar}</span>
+                            <span className="min-w-0 truncate text-xs text-foreground" title={p.name}>{p.name}</span>
                           </div>
                           {!breakoutActive && (
-                            <button onClick={() => unassignParticipant(pid)} aria-label={`Remove ${p.name} from ${room.name}`} className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-xs text-muted-foreground hover:bg-destructive/10 hover:text-destructive">✕</button>
+                            <button onClick={() => unassignParticipant(pid)} aria-label={`Remove ${p.name} from ${room.name}`} className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-xs text-muted-foreground hover:bg-destructive/10 hover:text-destructive">✕</button>
                           )}
                         </div>
                       );
@@ -218,11 +218,11 @@ export function BreakoutRoomsModal() {
                     )}
                     </div>
                     {!breakoutActive && (
-                      <div className="mt-3 shrink-0 pt-1">
+                      <div className="mt-2 shrink-0">
                         {unassigned.length > 0 && (
                           <select
                             onChange={(e) => { if (e.target.value) { assignParticipant(e.target.value, room.id); e.target.value = ''; }}}
-                            className="w-full min-w-0 rounded-xl border border-input bg-background px-3 py-2 text-xs text-muted-foreground"
+                            className="w-full min-w-0 rounded-lg border border-input bg-background px-2 py-1.5 text-xs text-muted-foreground"
                             defaultValue=""
                           >
                             <option value="" disabled>+ Add participant</option>
@@ -241,7 +241,7 @@ export function BreakoutRoomsModal() {
             </div>
 
             {/* Footer */}
-            <div className="flex gap-3 border-t border-border px-4 py-3 sm:px-5 sm:py-4" data-testid="breakout-modal-footer">
+            <div className="flex shrink-0 gap-3 border-t border-border bg-background px-5 py-3" data-testid="breakout-modal-footer">
               {breakoutActive ? (
                 <motion.button
                   whileTap={{ scale: 0.98 }}
