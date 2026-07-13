@@ -4,6 +4,8 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { Switch } from '@/components/ui/switch';
 import { useEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
+import { usePanelOverlayMode } from '@/hooks/use-mobile';
+import { MobileModalShell } from './MobileModalShell';
 
 const LANGUAGES = [
   { value: 'en', label: 'English' },
@@ -104,6 +106,8 @@ export function SettingsModal() {
   } = useMeetingStore();
 
   const dialogRef = useRef<HTMLDivElement>(null);
+  const overlayMode = usePanelOverlayMode();
+  const isMobile = overlayMode === 'mobile';
 
   useEffect(() => {
     if (!isSettingsOpen) return;
@@ -136,6 +140,85 @@ export function SettingsModal() {
   }, [isSettingsOpen, toggleSettings]);
 
   if (typeof document === 'undefined') return null;
+
+  const settingsBody = (
+    <div className="grid gap-4 p-4 pb-6">
+      <SelectField icon={Languages} label="Translation Language" value={selectedLanguage} options={LANGUAGES} onChange={setSelectedLanguage} />
+      <SelectField icon={Mic} label="Microphone" value={selectedAudioInput} options={AUDIO_INPUTS} onChange={setSelectedAudioInput} />
+      <SelectField icon={Speaker} label="Speaker" value={selectedAudioOutput} options={AUDIO_OUTPUTS} onChange={setSelectedAudioOutput} />
+      <SelectField icon={Camera} label="Camera" value={selectedVideoInput} options={VIDEO_INPUTS} onChange={setSelectedVideoInput} />
+      <div>
+        <label className="mb-1.5 flex items-center gap-2 text-sm font-semibold text-foreground">
+          <Brain className="w-4 h-4 text-primary" /> AI Model
+        </label>
+        <div className="grid gap-2">
+          {AI_MODELS.map((m) => (
+            <button
+              key={m.value}
+              onClick={() => setSelectedAiModel(m.value)}
+              className={`min-h-14 w-full rounded-xl border p-3 text-left ${selectedAiModel === m.value ? 'border-primary bg-primary/5' : 'border-border'}`}
+            >
+              <p className={`text-sm font-medium ${selectedAiModel === m.value ? 'text-primary' : 'text-foreground'}`}>{m.label}</p>
+              <p className="mt-0.5 text-xs text-muted-foreground">{m.desc}</p>
+            </button>
+          ))}
+        </div>
+      </div>
+      <div>
+        <label className="mb-1.5 flex items-center gap-2 text-sm font-semibold text-foreground">
+          <Image className="w-4 h-4 text-primary" /> Virtual Background
+        </label>
+        <div className="grid grid-cols-4 gap-2">
+          {VIRTUAL_BACKGROUNDS.map((bg) => (
+            <button
+              key={bg.value}
+              onClick={() => setSelectedBackground(bg.value)}
+              className={`flex min-h-16 flex-col items-center justify-center gap-1 rounded-xl border p-2 ${selectedBackground === bg.value ? 'border-primary bg-primary/5' : 'border-border'}`}
+            >
+              <span className="text-xl">{bg.preview || '⊘'}</span>
+              <span className="text-[10px] leading-3 text-muted-foreground">{bg.label}</span>
+            </button>
+          ))}
+        </div>
+      </div>
+      <div className="flex items-center justify-between rounded-xl border border-border px-3 py-3">
+        <div className="flex min-w-0 items-center gap-3">
+          <Activity className="h-4 w-4 shrink-0 text-primary" />
+          <div className="min-w-0">
+            <p className="text-sm font-medium text-foreground">Performance HUD</p>
+            <p className="text-xs text-muted-foreground">FPS, packet loss & AI latency</p>
+          </div>
+        </div>
+        <Switch checked={showPerfHud} onCheckedChange={togglePerfHud} />
+      </div>
+    </div>
+  );
+
+  if (isMobile) {
+    return createPortal(
+      <AnimatePresence>
+        {isSettingsOpen && (
+          <MobileModalShell
+            title="Meeting Settings"
+            ariaLabel="Meeting Settings"
+            onClose={toggleSettings}
+            footer={
+              <motion.button
+                whileTap={{ scale: 0.98 }}
+                onClick={toggleSettings}
+                className="min-h-12 w-full rounded-xl bg-primary text-sm font-display font-bold text-primary-foreground"
+              >
+                Done
+              </motion.button>
+            }
+          >
+            {settingsBody}
+          </MobileModalShell>
+        )}
+      </AnimatePresence>,
+      document.body,
+    );
+  }
 
   const modal = (
     <AnimatePresence>
