@@ -241,7 +241,7 @@ export const useMeetingStore = create<MeetingState>((set) => ({
   isNoiseCancellationOn: persistedMeetingState?.isNoiseCancellationOn ?? false,
   isPipActive: false,
   isSettingsOpen: false,
-  rightPanel: persistedMeetingState?.rightPanel ?? 'ai',
+  rightPanel: persistedMeetingState?.rightPanel ?? null,
   latency: 'good',
   participants: persistedMeetingState?.meetingId ? [createLocalParticipant(persistedMeetingState.userName || 'You')] : INITIAL_PARTICIPANTS,
   transcript: [],
