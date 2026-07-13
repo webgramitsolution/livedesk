@@ -3,7 +3,7 @@ import { useMeetingStore } from '@/store/meetingStore';
 import { Switch } from '@/components/ui/switch';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useLiveTranscription } from '@/hooks/useLiveTranscription';
-import { useIsMobile } from '@/hooks/use-mobile';
+import { usePanelOverlayMode } from '@/hooks/use-mobile';
 
 const LANG_NAMES: Record<string, string> = {
   en: 'English', es: 'Spanish', fr: 'French', de: 'German',
@@ -52,7 +52,9 @@ export function AISidebar() {
   } = useMeetingStore();
 
   const { isConnected, isConnecting, liveTranscripts, partialText, error, start, stop, translateText } = useLiveTranscription();
-  const isMobile = useIsMobile();
+  const mode = usePanelOverlayMode();
+  const isOverlay = mode !== 'desktop';
+  const isMobile = mode === 'mobile';
 
   const isOpen = rightPanel === 'ai';
   const langLabel = LANG_NAMES[selectedLanguage] || selectedLanguage.toUpperCase();
@@ -75,7 +77,7 @@ export function AISidebar() {
     <AnimatePresence>
       {isOpen && (
         <>
-          {isMobile && (
+          {isOverlay && (
             <motion.div
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
@@ -85,16 +87,18 @@ export function AISidebar() {
             />
           )}
           <motion.aside
-            initial={isMobile ? { y: '100%', opacity: 0.6 } : { width: 0, opacity: 0 }}
-            animate={isMobile ? { y: 0, opacity: 1 } : { width: 320, opacity: 1 }}
-            exit={isMobile ? { y: '100%', opacity: 0.6 } : { width: 0, opacity: 0 }}
+            initial={isMobile ? { y: '100%', opacity: 0.6 } : mode === 'tablet' ? { x: '100%', opacity: 0.6 } : { width: 0, opacity: 0 }}
+            animate={isMobile ? { y: 0, opacity: 1 } : mode === 'tablet' ? { x: 0, opacity: 1 } : { width: 320, opacity: 1 }}
+            exit={isMobile ? { y: '100%', opacity: 0.6 } : mode === 'tablet' ? { x: '100%', opacity: 0.6 } : { width: 0, opacity: 0 }}
             transition={{ duration: 0.25, ease: 'easeInOut' }}
             className={`${
               isMobile
-                ? 'fixed inset-x-0 bottom-0 top-0 z-[60] rounded-none border-0'
-                : 'h-full shrink-0 border-l'
+                ? 'fixed inset-0 z-[60] rounded-none border-0'
+                : mode === 'tablet'
+                  ? 'fixed inset-y-0 right-0 w-[90vw] max-w-[420px] z-[60] border-l shadow-2xl'
+                  : 'h-full shrink-0 border-l'
             } bg-background flex flex-col overflow-hidden`}
-            style={isMobile ? undefined : { width: 320 }}
+            style={mode === 'desktop' ? { width: 320 } : undefined}
           >
           <div className="flex items-center justify-between p-4 border-b border-border">
             <div className="flex items-center gap-2">
