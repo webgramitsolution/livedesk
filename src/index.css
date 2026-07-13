@@ -1,0 +1,121 @@
+@import url('https://fonts.googleapis.com/css2?family=Google+Sans:wght@400;500;700&family=Roboto:wght@300;400;500;700&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --background: 0 0% 100%;
+    --foreground: 210 11% 15%;
+
+    --card: 210 17% 98%;
+    --card-foreground: 210 11% 15%;
+
+    --popover: 0 0% 100%;
+    --popover-foreground: 210 11% 15%;
+
+    --primary: 217 89% 50%;
+    --primary-foreground: 0 0% 100%;
+
+    --secondary: 210 14% 96%;
+    --secondary-foreground: 210 11% 15%;
+
+    --muted: 210 14% 96%;
+    --muted-foreground: 213 5% 39%;
+
+    --accent: 217 89% 50%;
+    --accent-foreground: 0 0% 100%;
+
+    --destructive: 4 80% 49%;
+    --destructive-foreground: 0 0% 100%;
+
+    --success: 140 54% 24%;
+    --success-foreground: 0 0% 100%;
+
+    --border: 210 18% 91%;
+    --input: 210 18% 91%;
+    --ring: 217 89% 50%;
+
+    --radius: 0.75rem;
+
+    --sidebar-background: 0 0% 100%;
+    --sidebar-foreground: 210 11% 15%;
+    --sidebar-primary: 217 89% 50%;
+    --sidebar-primary-foreground: 0 0% 100%;
+    --sidebar-accent: 210 14% 96%;
+    --sidebar-accent-foreground: 210 11% 15%;
+    --sidebar-border: 210 18% 91%;
+    --sidebar-ring: 217 89% 50%;
+
+    /* Custom tokens */
+    --video-bg: 210 11% 13%;
+    --control-bar-shadow: 0 8px 24px rgba(0, 0, 0, 0.15);
+    --tile-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+    --glass-bg: 0 0% 0% / 0.6;
+    --glass-blur: 4px;
+    --glow-primary: 0 0 0 2px hsl(217 89% 50%);
+    --subtitle-bg: 0 0% 0% / 0.65;
+
+    font-family: 'Roboto', 'Google Sans', system-ui, sans-serif;
+  }
+
+  .dark {
+    --background: 210 11% 13%;
+    --foreground: 210 40% 98%;
+    --card: 210 11% 17%;
+    --card-foreground: 210 40% 98%;
+    --popover: 210 11% 17%;
+    --popover-foreground: 210 40% 98%;
+    --primary: 217 89% 50%;
+    --primary-foreground: 0 0% 100%;
+    --secondary: 217 33% 17%;
+    --secondary-foreground: 210 40% 98%;
+    --muted: 217 33% 17%;
+    --muted-foreground: 215 20% 65%;
+    --accent: 217 33% 17%;
+    --accent-foreground: 210 40% 98%;
+    --destructive: 4 80% 49%;
+    --destructive-foreground: 210 40% 98%;
+    --success: 140 54% 24%;
+    --success-foreground: 210 40% 98%;
+    --border: 217 33% 17%;
+    --input: 217 33% 17%;
+    --ring: 212 27% 84%;
+    --sidebar-background: 210 11% 10%;
+    --sidebar-foreground: 210 40% 98%;
+    --sidebar-primary: 217 89% 50%;
+    --sidebar-primary-foreground: 0 0% 100%;
+    --sidebar-accent: 217 33% 17%;
+    --sidebar-accent-foreground: 210 40% 98%;
+    --sidebar-border: 217 33% 17%;
+    --sidebar-ring: 217 89% 50%;
+    --video-bg: 210 11% 8%;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+  body {
+    @apply bg-background text-foreground;
+  }
+}
+
+@layer utilities {
+  .glass-surface {
+    background: hsla(var(--glass-bg));
+    backdrop-filter: blur(var(--glass-blur));
+    -webkit-backdrop-filter: blur(var(--glass-blur));
+  }
+  .control-bar-elevated {
+    box-shadow: var(--control-bar-shadow);
+  }
+  .tile-elevated {
+    box-shadow: var(--tile-shadow);
+  }
+  .glow-ring {
+    box-shadow: var(--glow-primary);
+  }
+}
