@@ -172,7 +172,7 @@ export function BreakoutRoomsModal() {
                 {!breakoutActive && unassigned.length > 0 ? (
                    <div className="mb-4 rounded-2xl bg-secondary/50 p-3">
                     <p className="mb-3 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Unassigned ({unassigned.length})</p>
-                    <div className="grid grid-cols-[repeat(auto-fit,minmax(min(180px,100%),1fr))] gap-2">
+                    <div className="grid max-h-28 grid-cols-[repeat(auto-fit,minmax(min(180px,100%),1fr))] gap-2 overflow-y-auto pr-1">
                       {unassigned.map((p) => (
                         <div key={p.id} className="flex min-w-0 items-center gap-2 rounded-xl border border-border bg-background px-2 py-1.5 text-xs font-medium text-foreground">
                           <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-muted text-[9px] font-bold text-muted-foreground">{p.avatar}</span>
@@ -197,7 +197,7 @@ export function BreakoutRoomsModal() {
                     )}
                   </div>
                   <div className="flex min-h-0 flex-1 flex-col">
-                    <div className="min-h-0 flex-1 space-y-2 overflow-y-auto pr-1" data-testid="breakout-participant-list">
+                    <div className="min-h-0 max-h-40 flex-1 space-y-2 overflow-y-auto pr-1" data-testid="breakout-participant-list">
                     {room.participantIds.map((pid) => {
                       const p = getParticipant(pid);
                       if (!p) return null;
