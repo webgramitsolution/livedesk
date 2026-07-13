@@ -3,6 +3,8 @@ import { useMeetingStore, type Participant } from '@/store/meetingStore';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useState, useEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
+import { usePanelOverlayMode } from '@/hooks/use-mobile';
+import { MobileModalShell } from './MobileModalShell';
 
 interface BreakoutRoom {
   id: string;
@@ -12,6 +14,8 @@ interface BreakoutRoom {
 
 export function BreakoutRoomsModal() {
   const { showBreakoutRooms, toggleBreakoutRooms, participants, breakoutRooms, setBreakoutRooms, startBreakoutSession, breakoutActive, endBreakoutSession } = useMeetingStore();
+  const overlayMode = usePanelOverlayMode();
+  const isMobile = overlayMode === 'mobile';
   const [localRooms, setLocalRooms] = useState<BreakoutRoom[]>(
     breakoutRooms.length > 0 ? breakoutRooms : [
       { id: '1', name: 'Room 1', participantIds: [] },
@@ -114,6 +118,143 @@ export function BreakoutRoomsModal() {
   }, [showBreakoutRooms]);
 
   if (typeof document === 'undefined') return null;
+
+  const startFooterButton = breakoutActive ? (
+    <motion.button
+      whileTap={{ scale: 0.98 }}
+      onClick={endBreakoutSession}
+      className="flex w-full min-h-12 items-center justify-center gap-2 rounded-xl bg-destructive text-sm font-display font-bold text-destructive-foreground transition-colors hover:bg-destructive/90"
+      data-testid="breakout-end-button"
+    >
+      End Breakout Sessions
+    </motion.button>
+  ) : (
+    <motion.button
+      whileTap={{ scale: 0.98 }}
+      onClick={handleStart}
+      className="flex w-full min-h-12 items-center justify-center gap-2 rounded-xl bg-primary text-sm font-display font-bold text-primary-foreground transition-colors hover:bg-primary/90"
+      data-testid="breakout-start-button"
+    >
+      <ArrowRight className="w-4 h-4" /> Start Breakout Sessions
+    </motion.button>
+  );
+
+  const mobileModal = (
+    <AnimatePresence>
+      {showBreakoutRooms && (
+        <MobileModalShell
+          title="Breakout Rooms"
+          ariaLabel="Breakout Rooms"
+          onClose={toggleBreakoutRooms}
+          headerActions={
+            !breakoutActive ? (
+              <>
+                <button
+                  type="button"
+                  onClick={shuffleAll}
+                  className="inline-flex h-10 items-center gap-1.5 whitespace-nowrap rounded-full px-3 text-xs font-semibold text-foreground hover:bg-muted"
+                >
+                  <Shuffle className="h-4 w-4" /> Auto
+                </button>
+                <button
+                  type="button"
+                  onClick={addRoom}
+                  aria-label="Add room"
+                  className="inline-flex h-10 items-center gap-1.5 whitespace-nowrap rounded-full bg-primary px-3 text-xs font-semibold text-primary-foreground hover:bg-primary/90"
+                >
+                  <Plus className="h-4 w-4" /> Add
+                </button>
+              </>
+            ) : null
+          }
+          footer={startFooterButton}
+        >
+          <div className="flex flex-col gap-4 p-4 pb-6">
+            {!breakoutActive && unassigned.length > 0 && (
+              <section className="rounded-2xl bg-secondary/50 p-3">
+                <p className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+                  Unassigned ({unassigned.length})
+                </p>
+                <div className="flex flex-col gap-1.5">
+                  {unassigned.map((p) => (
+                    <div key={p.id} className="flex items-center gap-2 rounded-xl border border-border bg-background px-3 py-2">
+                      <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-muted text-xs font-bold text-muted-foreground">{p.avatar}</span>
+                      <span className="min-w-0 flex-1 truncate text-sm text-foreground">{p.name}</span>
+                    </div>
+                  ))}
+                </div>
+              </section>
+            )}
+
+            {localRooms.map((room) => (
+              <section key={room.id} className="rounded-2xl border border-border p-4">
+                <div className="mb-3 flex items-center justify-between gap-2">
+                  <h3 className="min-w-0 flex-1 truncate font-display text-base font-bold text-foreground">{room.name}</h3>
+                  {!breakoutActive && localRooms.length > 1 && (
+                    <button
+                      onClick={() => removeRoom(room.id)}
+                      className="min-h-10 shrink-0 rounded-lg px-3 text-xs font-semibold text-destructive hover:bg-destructive/10"
+                    >
+                      Remove
+                    </button>
+                  )}
+                </div>
+                <div className="flex flex-col gap-1.5">
+                  {room.participantIds.length === 0 && (
+                    <p className="py-1 text-sm italic text-muted-foreground">No participants</p>
+                  )}
+                  {room.participantIds.map((pid) => {
+                    const p = getParticipant(pid);
+                    if (!p) return null;
+                    return (
+                      <div key={pid} className="flex items-center justify-between gap-2 rounded-xl bg-muted/40 px-3 py-2">
+                        <div className="flex min-w-0 items-center gap-2">
+                          <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-primary/10 text-xs font-bold text-primary">{p.avatar}</span>
+                          <span className="min-w-0 truncate text-sm text-foreground">{p.name}</span>
+                        </div>
+                        {!breakoutActive && (
+                          <button
+                            onClick={() => unassignParticipant(pid)}
+                            aria-label={`Remove ${p.name} from ${room.name}`}
+                            className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
+                          >
+                            ✕
+                          </button>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+                {!breakoutActive && unassigned.length > 0 && (
+                  <select
+                    onChange={(e) => { if (e.target.value) { assignParticipant(e.target.value, room.id); e.target.value = ''; }}}
+                    defaultValue=""
+                    className="mt-3 min-h-11 w-full rounded-xl border border-input bg-background px-3 text-sm text-foreground"
+                  >
+                    <option value="" disabled>+ Add Participant</option>
+                    {unassigned.map((p) => (
+                      <option key={p.id} value={p.id}>{p.name}</option>
+                    ))}
+                  </select>
+                )}
+              </section>
+            ))}
+
+            {!breakoutActive && (
+              <button
+                onClick={addRoom}
+                className="flex min-h-12 items-center justify-center gap-2 rounded-2xl border-2 border-dashed border-border text-sm font-semibold text-muted-foreground hover:bg-muted/40 hover:text-foreground"
+              >
+                <Plus className="h-4 w-4" /> Create Room
+              </button>
+            )}
+          </div>
+        </MobileModalShell>
+      )}
+    </AnimatePresence>
+  );
+
+  if (isMobile) return createPortal(mobileModal, document.body);
 
   const modal = (
     <AnimatePresence>
