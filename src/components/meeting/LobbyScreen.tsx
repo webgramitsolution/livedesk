@@ -9,6 +9,8 @@ import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { useMeetingReminders } from '@/hooks/useMeetingReminders';
+import { useIsMobile } from '@/hooks/use-mobile';
+import { MobileLobbyScreen } from './MobileLobbyScreen';
 import {
   buildMeetingLink,
   clearPendingMeetingCode,
@@ -42,6 +44,7 @@ export function LobbyScreen() {
   const [searchParams] = useSearchParams();
   const navigate = useNavigate();
   const hasAutoJoinedRef = useRef(false);
+  const isMobile = useIsMobile();
 
   useMeetingReminders(Boolean(userEmail));
 
@@ -190,6 +193,19 @@ export function LobbyScreen() {
     toast.success('Signed out');
     navigate('/auth');
   };
+
+  if (isMobile && userEmail) {
+    return (
+      <MobileLobbyScreen
+        userEmail={userEmail}
+        meetingCode={meetingCode}
+        setMeetingCode={setMeetingCode}
+        onCreateInstant={handleCreateInstant}
+        onJoinWithCode={handleJoinWithCode}
+        onSignOut={handleSignOut}
+      />
+    );
+  }
 
   return (
     <div className="min-h-dvh flex flex-col bg-background relative overflow-x-hidden">
