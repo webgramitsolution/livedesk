@@ -170,6 +170,9 @@ test.describe('Modal accessibility and centering', () => {
 });
 
 test.describe('Breakout Rooms modal', () => {
+  const BREAKOUT_ZOOMS = [0.5, 0.67, 0.75, 0.9, 1, 1.1, 1.25];
+  const BREAKOUT_PANELS = ['none', 'Chat', 'AI Sidebar', 'Participants'] as const;
+
   const openBreakout = async (page: import('@playwright/test').Page) => {
     await page.keyboard.press('b');
     const dialog = page.getByRole('dialog', { name: 'Breakout Rooms' });
@@ -191,11 +194,111 @@ test.describe('Breakout Rooms modal', () => {
     // Centered
     const dx = Math.abs(box.x + box.width / 2 - vp.width / 2);
     expect.soft(dx, 'horizontal center delta').toBeLessThanOrEqual(3);
+    expect.soft(box.height, 'height stays constrained').toBeLessThanOrEqual(vp.height * 0.85 + 4);
   };
 
-  const ZOOMS = [0.5, 0.67, 0.75, 0.9, 1, 1.1, 1.25];
-  for (const zoom of ZOOMS) {
-    for (const panel of ['none', 'Chat', 'AI Sidebar', 'Participants'] as const) {
+  const seedBreakoutParticipants = async (page: import('@playwright/test').Page) => {
+    await page.evaluate(() => {
+      const store = (window as typeof window & {
+        __ZOOM_CONNECT_E2E__?: {
+          addBreakoutParticipants?: (names: string[]) => void;
+        };
+      }).__ZOOM_CONNECT_E2E__;
+
+      store?.addBreakoutParticipants?.([
+        'gemehug421xxxxxxxxxxxxxxxx',
+        'avery-long-participant-name-that-must-truncate',
+        'Marina Kovalenko',
+        'Daniel Thompson',
+        'Priya Ramanathan',
+        'Noah Fitzgerald',
+        'Charlotte Nguyen',
+        'Mateo Hernandez',
+        'Aisha Al-Fayed',
+        'Kenji Watanabe',
+        'Sofia Andersson',
+        'Lucas Beaumont',
+      ]);
+    });
+  };
+
+  const switchTabsAndAssertLayout = async (page: import('@playwright/test').Page) => {
+    const dialog = page.getByRole('dialog', { name: 'Breakout Rooms' });
+    const grid = page.locator('[data-testid="breakout-room-grid"]');
+    const body = page.locator('[data-testid="breakout-modal-body"]');
+    const addRoom = page.getByRole('button', { name: 'Add Room' });
+    const autoAssign = page.getByRole('button', { name: 'Auto-assign' });
+
+    for (let i = 0; i < 4; i++) await addRoom.click();
+    await assertModalOk(page);
+
+    await autoAssign.click();
+    await page.waitForTimeout(100);
+    await assertModalOk(page);
+
+    await addRoom.click();
+    await page.waitForTimeout(100);
+    await assertModalOk(page);
+
+    const metrics = await page.evaluate(() => {
+      const dialog = document.querySelector<HTMLElement>('[role="dialog"][aria-label="Breakout Rooms"]');
+      const grid = document.querySelector<HTMLElement>('[data-testid="breakout-room-grid"]');
+      const body = document.querySelector<HTMLElement>('[data-testid="breakout-modal-body"]');
+      const cards = Array.from(document.querySelectorAll<HTMLElement>('[data-testid="breakout-room-card"]'));
+      const chips = Array.from(document.querySelectorAll<HTMLElement>('[data-testid="breakout-participant-chip"]'));
+      const buttons = Array.from(document.querySelectorAll<HTMLElement>('[role="toolbar"][aria-label="Breakout room actions"] button'));
+
+      return {
+        bodyOverflowX: body ? body.scrollWidth - body.clientWidth : 0,
+        gridWidth: grid?.getBoundingClientRect().width ?? 0,
+        dialogWidth: dialog?.getBoundingClientRect().width ?? 0,
+        columns: cards.length ? new Set(cards.map((card) => Math.round(card.getBoundingClientRect().x))).size : 0,
+        cards: cards.map((card) => {
+          const rect = card.getBoundingClientRect();
+          return {
+            width: rect.width,
+            height: rect.height,
+            overflowsX: card.scrollWidth > card.clientWidth + 1,
+          };
+        }),
+        chips: chips.map((chip) => {
+          const rect = chip.getBoundingClientRect();
+          return {
+            width: rect.width,
+            overflowsX: chip.scrollWidth > chip.clientWidth + 1,
+          };
+        }),
+        actionButtons: buttons.map((button) => ({
+          width: button.getBoundingClientRect().width,
+          height: button.getBoundingClientRect().height,
+          overflowsX: button.scrollWidth > button.clientWidth + 1,
+        })),
+      };
+    });
+
+    expect.soft(metrics.bodyOverflowX, 'modal body must not overflow horizontally').toBeLessThanOrEqual(1);
+    expect.soft(metrics.gridWidth, 'grid fills available modal width').toBeGreaterThan(metrics.dialogWidth * 0.8);
+    expect.soft(metrics.columns, 'desktop grid should use multiple equal columns when space allows').toBeGreaterThanOrEqual(2);
+    for (const card of metrics.cards) {
+      expect.soft(card.width, 'room cards stay wide enough for readable titles').toBeGreaterThanOrEqual(250);
+      expect.soft(card.height, 'room card min-height is preserved').toBeGreaterThanOrEqual(210);
+      expect.soft(card.overflowsX, 'room card content must not overflow horizontally').toBeFalsy();
+    }
+    for (const chip of metrics.chips) {
+      expect.soft(chip.overflowsX, 'participant chip must truncate instead of overflowing').toBeFalsy();
+    }
+    for (const button of metrics.actionButtons) {
+      expect.soft(button.height, 'action buttons keep tap target height').toBeGreaterThanOrEqual(40);
+      expect.soft(button.overflowsX, 'action button labels must not wrap or clip').toBeFalsy();
+    }
+
+    await expect(dialog).toBeVisible();
+    await expect(grid).toBeVisible();
+    await expect(body).toBeVisible();
+  };
+
+  for (const zoom of BREAKOUT_ZOOMS) {
+    for (const panel of BREAKOUT_PANELS) {
       test(`stays centered without overflow at zoom ${zoom}x (panel: ${panel})`, async ({ page }) => {
         await page.setViewportSize({ width: 1440, height: 900 });
         await page.goto('/');
@@ -216,6 +319,25 @@ test.describe('Breakout Rooms modal', () => {
         if (!box) throw new Error('no box');
         expect.soft(box.width, 'width within viewport').toBeLessThanOrEqual(vp.width);
         expect.soft(box.height, 'height within 85dvh cap').toBeLessThanOrEqual(vp.height * 0.85 + 4);
+      });
+    }
+  }
+
+  for (const zoom of BREAKOUT_ZOOMS) {
+    for (const panel of BREAKOUT_PANELS) {
+      test(`keeps Breakout Rooms grid stable while switching Auto-assign/Add Room at ${zoom}x (panel: ${panel})`, async ({ page }) => {
+        await page.setViewportSize({ width: 1440, height: 900 });
+        await page.goto('/');
+        await seedBreakoutParticipants(page);
+        await page.evaluate((z) => {
+          (document.body.style as CSSStyleDeclaration & { zoom?: string }).zoom = String(z);
+        }, zoom);
+        if (panel !== 'none') {
+          const btn = page.getByRole('button', { name: panel }).first();
+          if (await btn.isVisible().catch(() => false)) await btn.click();
+        }
+        await openBreakout(page);
+        await switchTabsAndAssertLayout(page);
       });
     }
   }
