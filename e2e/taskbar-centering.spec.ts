@@ -256,7 +256,7 @@ test.describe('Breakout Rooms modal', () => {
         cards: cards.map((card) => {
           const rect = card.getBoundingClientRect();
           return {
-            width: rect.width,
+            width: card.clientWidth,
             height: rect.height,
             overflowsX: card.scrollWidth > card.clientWidth + 1,
           };
