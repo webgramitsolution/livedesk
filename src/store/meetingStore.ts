@@ -435,6 +435,7 @@ export const useMeetingStore = create<MeetingState>((set) => ({
       meetingId: '',
       meetingSessionId: '',
       isScreenSharing: false,
+      isSelfCapture: false,
       isRecording: false,
       recordingStartTime: null,
       meetingJoinedAt: null,
