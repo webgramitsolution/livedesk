@@ -101,15 +101,9 @@
   body {
     @apply bg-background text-foreground;
     overflow-x: hidden;
-    width: 100%;
   }
   html {
     overflow-x: hidden;
-    width: 100%;
-  }
-  #root {
-    overflow-x: hidden;
-    width: 100%;
   }
 }
 
