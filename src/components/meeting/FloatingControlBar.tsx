@@ -81,7 +81,7 @@ function ControlButton({
   onClick: () => void;
   compact?: boolean;
 }) {
-  const size = compact ? 'h-10 min-w-10 px-2' : 'h-11 min-w-11 px-2.5';
+  const size = compact ? 'h-12 flex-1 min-w-0 px-1' : 'h-11 min-w-11 px-2.5';
   const iconSize = 'w-4 h-4';
 
   return (
@@ -90,7 +90,9 @@ function ControlButton({
       whileTap={{ scale: 0.95 }}
       onClick={onClick}
       title={label}
-      className={`relative ${size} rounded-full flex items-center justify-center transition-colors shrink-0 ${
+      className={`relative ${size} rounded-full flex items-center justify-center transition-colors ${
+        compact ? '' : 'shrink-0'
+      } ${
         danger
           ? 'bg-destructive text-destructive-foreground hover:bg-destructive/90'
           : warning
