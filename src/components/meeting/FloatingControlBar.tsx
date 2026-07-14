@@ -202,7 +202,12 @@ export function FloatingControlBar() {
             exit={{ opacity: 0, y: 30, scale: 0.92 }}
             transition={{ type: 'spring', damping: 20, stiffness: 300 }}
             data-testid="floating-control-bar"
-            className="fixed bottom-[max(1rem,env(safe-area-inset-bottom))] inset-x-0 mx-auto z-40 flex w-fit max-w-[calc(100vw-1rem)] items-center justify-center gap-1.5 overflow-x-auto rounded-[28px] border border-border bg-background/95 px-2 py-2 backdrop-blur-md control-bar-elevated sm:bottom-4 sm:px-3 sm:py-2.5"
+            style={{ bottom: 'calc(env(safe-area-inset-bottom, 0px) + 16px)' }}
+            className={
+              isMobile
+                ? 'fixed left-1/2 -translate-x-1/2 z-40 flex items-center justify-between gap-1 h-16 w-[calc(100vw-24px)] max-w-[420px] rounded-[32px] overflow-hidden border border-border bg-background/95 px-2 backdrop-blur-md control-bar-elevated'
+                : 'fixed bottom-4 left-1/2 -translate-x-1/2 z-40 flex w-fit max-w-[calc(100vw-1rem)] items-center justify-center gap-1.5 rounded-[28px] border border-border bg-background/95 px-3 py-2.5 backdrop-blur-md control-bar-elevated'
+            }
           >
             {/* Core controls always visible */}
             <ControlButton icon={isMicOn ? Mic : MicOff} label={isMicOn ? 'Mute' : 'Unmute'} active={isMicOn} onClick={toggleMic} compact={isMobile} />
@@ -213,7 +218,7 @@ export function FloatingControlBar() {
             <ControlButton icon={Hand} label={myHandRaised ? 'Lower hand' : 'Raise hand'} warning={myHandRaised} onClick={() => toggleHandRaise('1')} compact={isMobile} />
             <ControlButton icon={Smile} label="Reactions" active={showReactions} highlight={showReactions} onClick={() => setShowReactions(!showReactions)} compact={isMobile} />
 
-            <div className="w-px h-6 bg-border shrink-0" />
+            {!isMobile && <div className="w-px h-6 bg-border shrink-0" />}
 
             <ControlButton icon={Users} label="Participants" active={rightPanel === 'participants'} highlight={rightPanel === 'participants'} onClick={() => toggleRightPanel('participants')} compact={isMobile} />
             <ControlButton icon={MessageCircle} label="Chat" active={rightPanel === 'chat'} highlight={rightPanel === 'chat'} badge={rightPanel !== 'chat' ? unreadChats : 0} onClick={() => toggleRightPanel('chat')} compact={isMobile} />
