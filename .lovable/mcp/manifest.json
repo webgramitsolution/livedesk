@@ -1,0 +1,119 @@
+{
+  "version": 1,
+  "sdk_version": "0.24.0",
+  "path": "/functions/v1/mcp",
+  "auth": {
+    "type": "oauth",
+    "issuer": "https://xgfgcklvrlvkqvvbpcvv.supabase.co/auth/v1",
+    "accepted_audiences": [
+      "authenticated"
+    ]
+  },
+  "mcp": {
+    "server": {
+      "name": "zoom-connect-mcp",
+      "version": "0.1.0",
+      "title": "Zoom Connect"
+    },
+    "tools": [
+      {
+        "name": "list_scheduled_meetings",
+        "title": "List scheduled meetings",
+        "description": "List the signed-in user's scheduled Zoom Connect meetings, ordered by date.",
+        "annotations": {
+          "readOnlyHint": true,
+          "idempotentHint": true,
+          "openWorldHint": false
+        },
+        "inputSchema": {
+          "$schema": "http://json-schema.org/draft-07/schema#",
+          "type": "object",
+          "properties": {
+            "limit": {
+              "description": "Max meetings to return (default 25).",
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100
+            }
+          }
+        },
+        "outputSchema": null
+      },
+      {
+        "name": "create_scheduled_meeting",
+        "title": "Schedule a meeting",
+        "description": "Create a new scheduled Zoom Connect meeting for the signed-in user.",
+        "annotations": {
+          "readOnlyHint": false,
+          "destructiveHint": false,
+          "openWorldHint": false
+        },
+        "inputSchema": {
+          "$schema": "http://json-schema.org/draft-07/schema#",
+          "type": "object",
+          "properties": {
+            "title": {
+              "type": "string",
+              "minLength": 1,
+              "description": "Meeting title."
+            },
+            "meeting_date": {
+              "type": "string",
+              "description": "Meeting date in YYYY-MM-DD format."
+            },
+            "meeting_time": {
+              "type": "string",
+              "description": "Meeting time in HH:MM (24h) format."
+            },
+            "duration": {
+              "description": "Duration label, e.g. '30 min', '1 hour'.",
+              "type": "string"
+            },
+            "recurrence": {
+              "description": "Recurrence rule label, e.g. 'weekly'.",
+              "type": "string"
+            },
+            "invitees": {
+              "description": "Invitee emails.",
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          },
+          "required": [
+            "title",
+            "meeting_date",
+            "meeting_time"
+          ]
+        },
+        "outputSchema": null
+      },
+      {
+        "name": "list_active_meeting_participants",
+        "title": "List active meeting participants",
+        "description": "List participants currently present in a Zoom Connect meeting by meeting code.",
+        "annotations": {
+          "readOnlyHint": true,
+          "idempotentHint": true,
+          "openWorldHint": false
+        },
+        "inputSchema": {
+          "$schema": "http://json-schema.org/draft-07/schema#",
+          "type": "object",
+          "properties": {
+            "meeting_code": {
+              "type": "string",
+              "minLength": 1,
+              "description": "The meeting code to inspect."
+            }
+          },
+          "required": [
+            "meeting_code"
+          ]
+        },
+        "outputSchema": null
+      }
+    ]
+  }
+}
