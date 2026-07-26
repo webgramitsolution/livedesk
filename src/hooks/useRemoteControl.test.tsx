@@ -108,16 +108,17 @@ describe('useRemoteControl — multi-viewer queue, audit log, lock', () => {
     await flush();
     act(() => {
       // Viewer must first learn who the presenter is, otherwise lock messages
-      // are rejected as unauthorized.
+      // are rejected as unauthorized. Use a distinct id so self-echo guard
+      // doesn't drop the test messages.
       viewer.result.current.__handleMessage({
         kind: 'presenter',
-        from: 'presenter-session',
+        from: 'other-presenter',
         name: 'Host',
         sharing: true,
       });
       viewer.result.current.__handleMessage({
         kind: 'lock',
-        from: 'presenter-session',
+        from: 'other-presenter',
         presenterName: 'Host',
         controllerId: 'viewer-2',
         controllerName: 'Bob',
@@ -125,7 +126,7 @@ describe('useRemoteControl — multi-viewer queue, audit log, lock', () => {
       });
     });
     expect(viewer.result.current.controlLock).toEqual({
-      presenterId: 'presenter-session',
+      presenterId: 'other-presenter',
       presenterName: 'Host',
       controllerId: 'viewer-2',
       controllerName: 'Bob',
