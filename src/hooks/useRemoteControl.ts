@@ -121,6 +121,14 @@ export function useRemoteControl(options: UseRemoteControlOptions) {
     remotePresenterIdRef.current = remotePresenterId;
   }, [remotePresenterId]);
   const grantLatencySamples = useRef<number[]>([]);
+  const requestQueueRef = useRef<IncomingRequest[]>([]);
+  useEffect(() => {
+    requestQueueRef.current = requestQueue;
+  }, [requestQueue]);
+  const controlLockRef = useRef<ControlLock | null>(null);
+  useEffect(() => {
+    controlLockRef.current = controlLock;
+  }, [controlLock]);
 
   const channelRef = useRef<ReturnType<typeof supabase.channel> | null>(null);
   const optionsMeetingIdRef = useRef(meetingId);
@@ -465,7 +473,14 @@ export function useRemoteControl(options: UseRemoteControlOptions) {
 
   useEffect(() => {
     return () => {
-      if (meetingId && sessionId && status.state === 'idle' && !activeController && !controlLock && requestQueue.length === 0) {
+      // Read the LATEST state via refs — the effect only depends on
+      // meetingId/sessionId, so the destroy closure would otherwise capture
+      // the empty state that existed at mount and wipe a live queue.
+      const st = statusRef.current;
+      const ac = activeControllerRef.current;
+      const q = requestQueueRef.current;
+      const lock = controlLockRef.current;
+      if (meetingId && sessionId && st.state === 'idle' && !ac && !lock && q.length === 0) {
         clearRCState(meetingId, sessionId);
       }
     };

@@ -1,4 +1,6 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
+import Module from 'module';
+import path from 'path';
 
 /**
  * End-to-end-ish test for the Electron main-process remote-control handler.
@@ -66,7 +68,10 @@ const nutMock: NutMock = {
 
 const ipcHandlers = new Map<string, (evt: unknown, payload: unknown) => Promise<unknown>>();
 
-vi.mock('electron', () => ({
+// electron & nut-js aren't installed in this sandbox (they're pulled in only
+// for packaged desktop builds). Intercept `require()` inside the handler so
+// it resolves to our in-memory doubles.
+const electronStub = {
   ipcMain: {
     handle: (channel: string, fn: (evt: unknown, payload: unknown) => Promise<unknown>) => {
       ipcHandlers.set(channel, fn);
@@ -75,14 +80,26 @@ vi.mock('electron', () => ({
   screen: {
     getPrimaryDisplay: () => ({ size: { width: 1920, height: 1080 } }),
   },
-}));
+};
 
-vi.mock('@nut-tree-fork/nut-js', () => nutMock);
+// @ts-expect-error — Module internals aren't in the public typings.
+const originalResolve = Module._resolveFilename;
+// @ts-expect-error — same.
+Module._resolveFilename = function (request: string, parent: unknown, ...rest: unknown[]) {
+  if (request === 'electron') return '__stub_electron__';
+  if (request === '@nut-tree-fork/nut-js' || request === '@nut-tree/nut-js') return '__stub_nut__';
+  return originalResolve.call(this, request, parent, ...rest);
+};
+// @ts-expect-error — Module cache is untyped.
+Module._cache['__stub_electron__'] = { exports: electronStub, loaded: true, id: '__stub_electron__' };
+// @ts-expect-error — Module cache is untyped.
+Module._cache['__stub_nut__'] = { exports: nutMock, loaded: true, id: '__stub_nut__' };
 
 // eslint-disable-next-line @typescript-eslint/no-require-imports
-const { registerRemoteControlHandler } = require('../../electron/remoteControlHandler.cjs') as {
-  registerRemoteControlHandler: () => void;
-};
+const { registerRemoteControlHandler } = require(path.resolve(
+  __dirname,
+  '../../electron/remoteControlHandler.cjs',
+)) as { registerRemoteControlHandler: () => void };
 
 async function invoke(payload: unknown) {
   const handler = ipcHandlers.get('remote-control:input');
