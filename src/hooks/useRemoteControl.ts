@@ -120,6 +120,14 @@ export function useRemoteControl(options: UseRemoteControlOptions) {
       }
   >(null);
 
+  // Auto-clear the "Session restored" indicator after 6 seconds so it doesn't
+  // linger forever — it's a transient confirmation, not persistent chrome.
+  useEffect(() => {
+    if (!sessionRestored) return;
+    const id = setTimeout(() => setSessionRestored(null), 6000);
+    return () => clearTimeout(id);
+  }, [sessionRestored]);
+
   // Tuning: caller may pass an override; otherwise pull the persisted per-meeting values.
   const tuning: RCTuning = options.tuning ?? loadRCTuning(meetingId) ?? DEFAULT_RC_TUNING;
   const tuningRef = useRef<RCTuning>(tuning);
