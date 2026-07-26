@@ -12,6 +12,9 @@ import {
   type RCInputEvent,
   type RCMessage,
 } from '@/lib/remoteControl/protocol';
+import { validateRCMessage } from '@/lib/remoteControl/validation';
+import { loadRCTuning, DEFAULT_RC_TUNING, type RCTuning } from '@/lib/remoteControl/settings';
+import { loadRCState, saveRCState, clearRCState } from '@/lib/remoteControl/persistence';
 
 export interface RemoteCursor {
   id: string;
@@ -53,17 +56,26 @@ export type ControlStatus =
   | { state: 'controlling'; presenterId: string; nonce: string; allowKeyboard: boolean; since: number }
   | { state: 'denied'; presenterId: string; reason?: string; since: number };
 
+export interface RCMetrics {
+  requestsSent: number;
+  grantsReceived: number;
+  deniesReceived: number;
+  lastGrantLatencyMs: number | null;
+  avgGrantLatencyMs: number | null;
+  throttledOutbound: number; // count of local events dropped by rate limit
+  droppedInboundInvalid: number; // count of invalid/unauthorized inbound messages
+  droppedInboundUnauthorized: number;
+}
+
 const CURSOR_STALE_MS = 4000;
 const REQUEST_TIMEOUT_MS = 30_000;
-// Input rate limiting: cap high-frequency events server-side (per-sender).
-const MOUSEMOVE_MIN_INTERVAL_MS = 16; // ~60Hz
-const WHEEL_MIN_INTERVAL_MS = 16;
 
 interface UseRemoteControlOptions {
   meetingId: string;
   isInMeeting: boolean;
   isLocalPresenter: boolean; // true when we are sharing a screen
   onExecuteInput?: (event: RCInputEvent, fromName: string) => void;
+  tuning?: RCTuning;
 }
 
 export function useRemoteControl({
@@ -85,8 +97,39 @@ export function useRemoteControl({
   >(null);
   const [status, setStatus] = useState<ControlStatus>({ state: 'idle' });
   const [controlLock, setControlLock] = useState<ControlLock | null>(null);
+  const [metrics, setMetrics] = useState<RCMetrics>({
+    requestsSent: 0,
+    grantsReceived: 0,
+    deniesReceived: 0,
+    lastGrantLatencyMs: null,
+    avgGrantLatencyMs: null,
+    throttledOutbound: 0,
+    droppedInboundInvalid: 0,
+    droppedInboundUnauthorized: 0,
+  });
+
+  // Tuning: caller may pass an override; otherwise pull the persisted per-meeting values.
+  const tuning: RCTuning = options?.tuning ?? loadRCTuning(meetingId) ?? DEFAULT_RC_TUNING;
+  const tuningRef = useRef<RCTuning>(tuning);
+  useEffect(() => {
+    tuningRef.current = tuning;
+  }, [tuning.mousemoveMinMs, tuning.wheelMinMs, tuning.cursorSmoothingMs, tuning.cursorSendMinMs]);
+
+  // Tracks every peer we have heard from on this channel — used to reject
+  // control-state messages from unknown senders and to enforce that only the
+  // active presenter can broadcast lock updates.
+  const knownPeersRef = useRef<Set<string>>(new Set());
+  const remotePresenterIdRef = useRef<string | null>(null);
+  useEffect(() => {
+    remotePresenterIdRef.current = remotePresenterId;
+  }, [remotePresenterId]);
+  const grantLatencySamples = useRef<number[]>([]);
 
   const channelRef = useRef<ReturnType<typeof supabase.channel> | null>(null);
+  const optionsMeetingIdRef = useRef(meetingId);
+  useEffect(() => {
+    optionsMeetingIdRef.current = meetingId;
+  }, [meetingId]);
   const readyRef = useRef(false);
   const statusRef = useRef(status);
   useEffect(() => {
@@ -109,7 +152,15 @@ export function useRemoteControl({
     userNameRef.current = userName;
   }, [userName]);
   // Rate-limit outbound input events per type.
-  const lastInputRef = useRef<{ move: number; wheel: number }>({ move: 0, wheel: 0 });
+  const lastInputRef = useRef<{ move: number; wheel: number; cursor: number }>({ move: 0, wheel: 0, cursor: 0 });
+
+  const bumpDropped = useCallback((key: 'invalid' | 'unauthorized') => {
+    setMetrics((m) => ({
+      ...m,
+      droppedInboundInvalid: key === 'invalid' ? m.droppedInboundInvalid + 1 : m.droppedInboundInvalid,
+      droppedInboundUnauthorized: key === 'unauthorized' ? m.droppedInboundUnauthorized + 1 : m.droppedInboundUnauthorized,
+    }));
+  }, []);
 
   // Prune stale cursors.
   useEffect(() => {
@@ -153,8 +204,17 @@ export function useRemoteControl({
 
   // --- Message router ---
   const handleMessage = useCallback(
-    (msg: RCMessage) => {
+    (raw: unknown) => {
+      const msg = validateRCMessage(raw);
+      if (!msg) {
+        bumpDropped('invalid');
+        return;
+      }
       if (msg.from === sessionId) return; // ignore self-echo
+      // Track the sender as a known peer. Presenter announcements and cursor
+      // broadcasts serve as our lightweight participant discovery — control
+      // messages from a completely unseen id are rejected below.
+      knownPeersRef.current.add(msg.from);
 
       switch (msg.kind) {
         case 'presenter': {
@@ -173,6 +233,12 @@ export function useRemoteControl({
           break;
         }
         case 'lock': {
+          // Only the current presenter (as tracked by us) is authorized to
+          // publish a lock. Anything else is dropped.
+          if (msg.from !== remotePresenterIdRef.current) {
+            bumpDropped('unauthorized');
+            return;
+          }
           if (msg.controllerId && msg.controllerName && msg.mode) {
             setControlLock({
               presenterId: msg.from,
@@ -248,7 +314,22 @@ export function useRemoteControl({
         case 'grant': {
           if (msg.to !== sessionId) return;
           const st = statusRef.current;
-          if (st.state !== 'requesting' || st.presenterId !== msg.from) return;
+          if (st.state !== 'requesting' || st.presenterId !== msg.from) {
+            bumpDropped('unauthorized');
+            return;
+          }
+          const latency = Date.now() - st.since;
+          grantLatencySamples.current.push(latency);
+          if (grantLatencySamples.current.length > 20) grantLatencySamples.current.shift();
+          const avg =
+            grantLatencySamples.current.reduce((a, b) => a + b, 0) /
+            grantLatencySamples.current.length;
+          setMetrics((m) => ({
+            ...m,
+            grantsReceived: m.grantsReceived + 1,
+            lastGrantLatencyMs: latency,
+            avgGrantLatencyMs: Math.round(avg),
+          }));
           setStatus({
             state: 'controlling',
             presenterId: msg.from,
@@ -270,6 +351,12 @@ export function useRemoteControl({
         }
         case 'deny': {
           if (msg.to !== sessionId) return;
+          const st = statusRef.current;
+          if (st.state === 'requesting' && st.presenterId !== msg.from) {
+            bumpDropped('unauthorized');
+            return;
+          }
+          setMetrics((m) => ({ ...m, deniesReceived: m.deniesReceived + 1 }));
           setStatus({ state: 'denied', presenterId: msg.from, reason: msg.reason, since: Date.now() });
           toast.error(`Control request denied${msg.reason ? `: ${msg.reason}` : ''}`);
           logRCAudit({
@@ -287,6 +374,11 @@ export function useRemoteControl({
         }
         case 'revoke': {
           if (msg.to !== sessionId) return;
+          const st = statusRef.current;
+          if (st.state === 'controlling' && st.presenterId !== msg.from) {
+            bumpDropped('unauthorized');
+            return;
+          }
           // Presenter revoked our control.
           setStatus({ state: 'idle' });
           if (activeControllerRef.current?.id === msg.from) {
@@ -307,27 +399,53 @@ export function useRemoteControl({
           if (msg.to !== sessionId) return;
           if (!isLocalPresenterRef.current) return;
           const active = activeControllerRef.current;
-          if (!active || active.id !== msg.from || active.nonce !== msg.nonce) return;
-          if (!active.allowKeyboard && (msg.event.type === 'keydown' || msg.event.type === 'keyup')) return;
+          if (!active || active.id !== msg.from || active.nonce !== msg.nonce) {
+            bumpDropped('unauthorized');
+            return;
+          }
+          if (!active.allowKeyboard && (msg.event.type === 'keydown' || msg.event.type === 'keyup')) {
+            bumpDropped('unauthorized');
+            return;
+          }
           onExecuteInputRef.current?.(msg.event, active.name);
           break;
         }
       }
     },
-    [sessionId],
+    [sessionId, meetingId, bumpDropped],
   );
 
   // Subscribe to signaling channel.
   useEffect(() => {
     if (!isInMeeting || !meetingId || !sessionId) return;
+    // Rehydrate from a recent local snapshot on (re)mount so a brief
+    // disconnect doesn't lose the queue, lock, or pending request.
+    const persisted = loadRCState(meetingId, sessionId);
+    if (persisted) {
+      setRequestQueue(persisted.requestQueue ?? []);
+      setActiveController(persisted.activeController ?? null);
+      setControlLock(persisted.controlLock ?? null);
+      setStatus(persisted.status ?? { state: 'idle' });
+    }
     const channel = supabase.channel(`webrtc-${meetingId}`, {
       config: { broadcast: { self: false } },
     });
     channelRef.current = channel;
     channel
-      .on('broadcast', { event: RC_EVENT }, ({ payload }) => handleMessage(payload as RCMessage))
+      .on('broadcast', { event: RC_EVENT }, ({ payload }) => handleMessage(payload))
       .subscribe((s) => {
         readyRef.current = s === 'SUBSCRIBED';
+        if (s === 'SUBSCRIBED' && persisted?.status?.state === 'requesting') {
+          // We had a pending request — re-issue the request so the presenter
+          // can (re)notify us without a duplicate row on their side (the
+          // presenter's queue is deduped by sender id).
+          const p = persisted.status as { state: 'requesting'; presenterId: string };
+          channel.send({
+            type: 'broadcast',
+            event: RC_EVENT,
+            payload: { kind: 'request', from: sessionId, name: userNameRef.current, to: p.presenterId },
+          });
+        }
       });
     return () => {
       readyRef.current = false;
@@ -335,6 +453,26 @@ export function useRemoteControl({
       channelRef.current = null;
     };
   }, [handleMessage, isInMeeting, meetingId, sessionId]);
+
+  // Persist queue / lock / status snapshots so a reconnect resumes cleanly.
+  useEffect(() => {
+    if (!isInMeeting || !meetingId || !sessionId) return;
+    saveRCState(meetingId, sessionId, {
+      requestQueue,
+      activeController,
+      controlLock,
+      status,
+    });
+  }, [isInMeeting, meetingId, sessionId, requestQueue, activeController, controlLock, status]);
+
+  useEffect(() => {
+    return () => {
+      if (meetingId && sessionId && status.state === 'idle' && !activeController && !controlLock && requestQueue.length === 0) {
+        clearRCState(meetingId, sessionId);
+      }
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [meetingId, sessionId]);
 
   // Announce presenter status.
   useEffect(() => {
@@ -413,6 +551,7 @@ export function useRemoteControl({
   const requestControl = useCallback(() => {
     if (!remotePresenterId || !sessionId) return;
     setStatus({ state: 'requesting', presenterId: remotePresenterId, since: Date.now() });
+    setMetrics((m) => ({ ...m, requestsSent: m.requestsSent + 1 }));
     send({ kind: 'request', from: sessionId, name: userName, to: remotePresenterId });
     logRCAudit({
       action: 'request',
@@ -507,13 +646,20 @@ export function useRemoteControl({
     (event: RCInputEvent) => {
       const st = statusRef.current;
       if (st.state !== 'controlling') return;
-      // Rate-limit high-frequency motion / wheel events.
+      // Rate-limit high-frequency motion / wheel events using per-meeting tuning.
       const now = performance.now();
+      const t = tuningRef.current;
       if (event.type === 'mousemove') {
-        if (now - lastInputRef.current.move < MOUSEMOVE_MIN_INTERVAL_MS) return;
+        if (now - lastInputRef.current.move < t.mousemoveMinMs) {
+          setMetrics((m) => ({ ...m, throttledOutbound: m.throttledOutbound + 1 }));
+          return;
+        }
         lastInputRef.current.move = now;
       } else if (event.type === 'wheel') {
-        if (now - lastInputRef.current.wheel < WHEEL_MIN_INTERVAL_MS) return;
+        if (now - lastInputRef.current.wheel < t.wheelMinMs) {
+          setMetrics((m) => ({ ...m, throttledOutbound: m.throttledOutbound + 1 }));
+          return;
+        }
         lastInputRef.current.wheel = now;
       }
       send({ kind: 'input', from: sessionId, to: st.presenterId, nonce: st.nonce, event });
@@ -550,6 +696,8 @@ export function useRemoteControl({
     requestQueue,
     activeController,
     controlLock,
+    metrics,
+    tuning,
     requestControl,
     cancelRequest,
     releaseControl,
@@ -565,6 +713,8 @@ export function useRemoteControl({
     denyRequest,
     reclaimControl,
     sendInput,
+    /** Exposed for automated tests to inject validated messages. */
+    __handleMessage: handleMessage,
   };
 }
 
