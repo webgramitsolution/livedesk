@@ -71,6 +71,7 @@ function AudioLevelBars({ isMuted, isSpeaking }: { isMuted: boolean; isSpeaking:
 export function VideoTile({ participant, subtitle, compact, mediaStream }: VideoTileProps) {
   const audioRef = useRef<HTMLAudioElement>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
+  const remoteAudioStreamRef = useRef<MediaStream | null>(null);
   const [audioBlocked, setAudioBlocked] = useState(false);
   const gradientIndex = participant.id
     .split('')
@@ -84,10 +85,14 @@ export function VideoTile({ participant, subtitle, compact, mediaStream }: Video
     [allReactions, participant.id]
   );
 
-  // Attach media stream to video element
+  // Attach media stream to video element and keep remote audio playback
+  // separate so muted video preview never suppresses participant voice.
   useEffect(() => {
     if (!mediaStream) {
       setAudioBlocked(false);
+      if (videoRef.current) videoRef.current.srcObject = null;
+      if (audioRef.current) audioRef.current.srcObject = null;
+      remoteAudioStreamRef.current = null;
       return;
     }
 
@@ -98,7 +103,11 @@ export function VideoTile({ participant, subtitle, compact, mediaStream }: Video
     }
 
     if (audioRef.current && participant.id !== '1') {
-      audioRef.current.srcObject = mediaStream;
+      const audioOnlyStream = new MediaStream(mediaStream.getAudioTracks());
+      remoteAudioStreamRef.current = audioOnlyStream;
+      audioRef.current.srcObject = audioOnlyStream;
+      audioRef.current.muted = false;
+      audioRef.current.volume = 1;
     }
 
     const playMedia = async () => {
@@ -113,6 +122,32 @@ export function VideoTile({ participant, subtitle, compact, mediaStream }: Video
     };
 
     void playMedia();
+
+    const retryAudio = () => {
+      if (participant.id === '1') return;
+      void audioRef.current?.play().then(() => setAudioBlocked(false)).catch(() => setAudioBlocked(true));
+    };
+
+    const audioTracks = mediaStream.getAudioTracks();
+    audioTracks.forEach((track) => {
+      track.addEventListener('unmute', retryAudio);
+      track.addEventListener('ended', retryAudio);
+    });
+    window.addEventListener('pointerdown', retryAudio, { passive: true });
+    window.addEventListener('keydown', retryAudio);
+
+    return () => {
+      audioTracks.forEach((track) => {
+        track.removeEventListener('unmute', retryAudio);
+        track.removeEventListener('ended', retryAudio);
+      });
+      window.removeEventListener('pointerdown', retryAudio);
+      window.removeEventListener('keydown', retryAudio);
+      if (participant.id !== '1') {
+        remoteAudioStreamRef.current = null;
+        if (audioRef.current) audioRef.current.srcObject = null;
+      }
+    };
   }, [mediaStream, participant.id]);
 
   const handleEnableAudio = async () => {
@@ -152,7 +187,7 @@ export function VideoTile({ participant, subtitle, compact, mediaStream }: Video
       } ${participant.isSpeaking ? 'ring-2 ring-success' : ''}`}
     >
       {mediaStream && participant.id !== '1' ? (
-        <audio ref={audioRef} autoPlay playsInline />
+        <audio ref={audioRef} autoPlay playsInline preload="auto" />
       ) : null}
 
       {audioDiagnostic && !compact && (
