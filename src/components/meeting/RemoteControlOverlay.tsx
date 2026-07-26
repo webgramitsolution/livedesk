@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { MousePointer2, Hand, MonitorCog, KeyRound, X, Lock, Download } from 'lucide-react';
 import type { UseRemoteControlReturn } from '@/hooks/useRemoteControl';
