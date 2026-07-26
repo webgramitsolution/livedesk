@@ -61,6 +61,38 @@ export function useWebRTC(meetingId: string, isInMeeting: boolean) {
   const [remoteScreenStream, setRemoteScreenStream] = useState<MediaStream | null>(null);
   const { isMicOn, isCameraOn, isScreenSharing, toggleScreenShare, isNoiseCancellationOn, meetingSessionId, setSelfCapture } = useMeetingStore();
 
+  const ensurePresenceReady = useCallback(async () => {
+    if (!meetingId || !meetingSessionId) return false;
+
+    const db = supabase as typeof supabase & {
+      from: (table: string) => {
+        select: (columns: string, options?: { head?: boolean; count?: 'exact' }) => {
+          eq: (column: string, value: string) => {
+            eq: (column: string, value: string) => Promise<{ count: number | null; error: unknown }>;
+          };
+        };
+      };
+    };
+
+    for (let attempt = 0; attempt < 12; attempt += 1) {
+      const { count, error } = await db
+        .from('meeting_presence')
+        .select('id', { head: true, count: 'exact' })
+        .eq('meeting_code', meetingId)
+        .eq('session_id', meetingSessionId);
+
+      if (!error && (count ?? 0) > 0) {
+        logWebRTCEvent('presence', 'ready-for-signaling', { attempt });
+        return true;
+      }
+
+      await new Promise((resolve) => setTimeout(resolve, 250));
+    }
+
+    logWebRTCEvent('presence', 'signaling-started-before-presence-confirmed');
+    return true;
+  }, [meetingId, meetingSessionId]);
+
   // Unique capture-handle so we can detect if the user picks the meeting tab itself
   const captureHandleRef = useRef<string>(`zoom-connect-${myPeerIdRef.current}`);
   useEffect(() => {
@@ -197,14 +229,16 @@ export function useWebRTC(meetingId: string, isInMeeting: boolean) {
       // Add local camera/mic tracks
       if (localStreamRef.current) {
         localStreamRef.current.getTracks().forEach((track) => {
-          pc.addTrack(track, localStreamRef.current!);
+          const localStream = localStreamRef.current;
+          if (localStream) pc.addTrack(track, localStream);
         });
       }
 
       // Add screen share tracks if active
       if (screenStreamRef.current) {
         screenStreamRef.current.getTracks().forEach((track) => {
-          pc.addTrack(track, screenStreamRef.current!);
+          const screenStream = screenStreamRef.current;
+          if (screenStream) pc.addTrack(track, screenStream);
         });
       }
 
@@ -243,12 +277,14 @@ export function useWebRTC(meetingId: string, isInMeeting: boolean) {
         track.addEventListener('mute', () =>
           logWebRTCEvent('track', 'remote-track-muted', { kind: track.kind }, peerId),
         );
-        track.addEventListener('unmute', () =>
-          logWebRTCEvent('track', 'remote-track-unmuted', { kind: track.kind }, peerId),
-        );
-        track.addEventListener('ended', () =>
-          logWebRTCEvent('track', 'remote-track-ended', { kind: track.kind }, peerId),
-        );
+        track.addEventListener('unmute', () => {
+          logWebRTCEvent('track', 'remote-track-unmuted', { kind: track.kind }, peerId);
+          updateRemoteStreams();
+        });
+        track.addEventListener('ended', () => {
+          logWebRTCEvent('track', 'remote-track-ended', { kind: track.kind }, peerId);
+          updateRemoteStreams();
+        });
         updateRemoteStreams();
       };
 
@@ -402,7 +438,8 @@ export function useWebRTC(meetingId: string, isInMeeting: boolean) {
           localStreamRef.current.getTracks().forEach((track) => {
             if (!senders.some((s) => s.track === track)) {
               try {
-                peer.pc.addTrack(track, localStreamRef.current!);
+                const localStream = localStreamRef.current;
+                if (localStream) peer.pc.addTrack(track, localStream);
               } catch {
                 /* ignore */
               }
@@ -666,62 +703,80 @@ export function useWebRTC(meetingId: string, isInMeeting: boolean) {
 
   // Setup signaling channel
   useEffect(() => {
-    if (!isInMeeting || !meetingId || !localStream) return;
+    if (!isInMeeting || !meetingId || !meetingSessionId || !localStream) return;
 
-    const channel = supabase.channel(`webrtc-${meetingId}`, {
-      config: { broadcast: { self: false } },
-    });
+    let cancelled = false;
+    let joinTimers: ReturnType<typeof setTimeout>[] = [];
+    let channel: ReturnType<typeof supabase.channel> | null = null;
 
-    channelRef.current = channel;
+    const sendJoinAnnouncement = () => {
+      if (!channel || cancelled) return;
+      channel.send({
+        type: 'broadcast',
+        event: 'join',
+        payload: { peerId: myPeerIdRef.current },
+      });
+      logWebRTCEvent('signal', 'send-join');
+    };
 
-    channel
-      .on('broadcast', { event: 'join' }, ({ payload }) => {
-        logWebRTCEvent('signal', 'recv-join', { from: payload.peerId });
-        if (payload.peerId !== myPeerIdRef.current && myPeerIdRef.current.localeCompare(payload.peerId) < 0) {
-          sendOfferToPeer(payload.peerId);
-        }
-      })
-      .on('broadcast', { event: 'offer' }, ({ payload }) => {
-        if (payload.to === myPeerIdRef.current) {
-          logWebRTCEvent('signal', 'recv-offer', undefined, payload.from);
-          handleOffer(payload.from, payload.offer);
-        }
-      })
-      .on('broadcast', { event: 'answer' }, ({ payload }) => {
-        if (payload.to === myPeerIdRef.current) {
-          logWebRTCEvent('signal', 'recv-answer', undefined, payload.from);
-          handleAnswer(payload.from, payload.answer);
-        }
-      })
-      .on('broadcast', { event: 'ice-candidate' }, ({ payload }) => {
-        if (payload.to === myPeerIdRef.current) {
-          handleIceCandidate(payload.from, payload.candidate);
-        }
-      })
-      .on('broadcast', { event: 'leave' }, ({ payload }) => {
-        logWebRTCEvent('signal', 'recv-leave', undefined, payload.peerId);
-        const peer = peersRef.current.get(payload.peerId);
-        if (peer) {
-          peer.pc.close();
-          peersRef.current.delete(payload.peerId);
-          updateRemoteStreams();
-          setRemoteScreenStream(null);
-        }
-      })
-      .subscribe((status) => {
-        logWebRTCEvent('signal', 'channel-status', { status });
-        if (status === 'SUBSCRIBED') {
-          channel.send({
-            type: 'broadcast',
-            event: 'join',
-            payload: { peerId: myPeerIdRef.current },
-          });
-          logWebRTCEvent('signal', 'send-join');
-        }
+    void (async () => {
+      const ready = await ensurePresenceReady();
+      if (!ready || cancelled) return;
+
+      channel = supabase.channel(`webrtc-${meetingId}`, {
+        config: { broadcast: { self: false } },
       });
 
+      channelRef.current = channel;
+
+      channel
+        .on('broadcast', { event: 'join' }, ({ payload }) => {
+          logWebRTCEvent('signal', 'recv-join', { from: payload.peerId });
+          if (payload.peerId !== myPeerIdRef.current) {
+            void sendOfferToPeer(payload.peerId);
+          }
+        })
+        .on('broadcast', { event: 'offer' }, ({ payload }) => {
+          if (payload.to === myPeerIdRef.current) {
+            logWebRTCEvent('signal', 'recv-offer', undefined, payload.from);
+            void handleOffer(payload.from, payload.offer);
+          }
+        })
+        .on('broadcast', { event: 'answer' }, ({ payload }) => {
+          if (payload.to === myPeerIdRef.current) {
+            logWebRTCEvent('signal', 'recv-answer', undefined, payload.from);
+            void handleAnswer(payload.from, payload.answer);
+          }
+        })
+        .on('broadcast', { event: 'ice-candidate' }, ({ payload }) => {
+          if (payload.to === myPeerIdRef.current) {
+            void handleIceCandidate(payload.from, payload.candidate);
+          }
+        })
+        .on('broadcast', { event: 'leave' }, ({ payload }) => {
+          logWebRTCEvent('signal', 'recv-leave', undefined, payload.peerId);
+          const peer = peersRef.current.get(payload.peerId);
+          if (peer) {
+            peer.pc.close();
+            peersRef.current.delete(payload.peerId);
+            updateRemoteStreams();
+            setRemoteScreenStream(null);
+          }
+        })
+        .subscribe((status) => {
+          logWebRTCEvent('signal', 'channel-status', { status });
+          if (status === 'SUBSCRIBED') {
+            sendJoinAnnouncement();
+            joinTimers = [700, 1500, 3000].map((delay) => setTimeout(sendJoinAnnouncement, delay));
+          }
+        });
+    })();
+
     return () => {
-      channel.send({
+      cancelled = true;
+      joinTimers.forEach((timer) => clearTimeout(timer));
+
+      channel?.send({
         type: 'broadcast',
         event: 'leave',
         payload: { peerId: myPeerIdRef.current },
@@ -733,10 +788,10 @@ export function useWebRTC(meetingId: string, isInMeeting: boolean) {
       setRemoteStreams(new Map());
       setRemoteScreenStream(null);
 
-      supabase.removeChannel(channel);
+      if (channel) supabase.removeChannel(channel);
       channelRef.current = null;
     };
-  }, [isInMeeting, localStream, meetingId, sendOfferToPeer, handleOffer, handleAnswer, handleIceCandidate, updateRemoteStreams]);
+  }, [ensurePresenceReady, handleAnswer, handleIceCandidate, handleOffer, isInMeeting, localStream, meetingId, meetingSessionId, sendOfferToPeer, updateRemoteStreams]);
 
   return {
     localStream,
