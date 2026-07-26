@@ -107,15 +107,17 @@ describe('useRemoteControl — multi-viewer queue, audit log, lock', () => {
     );
     await flush();
     act(() => {
-      // Viewer must first learn who the presenter is, otherwise lock messages
-      // are rejected as unauthorized. Use a distinct id so self-echo guard
-      // doesn't drop the test messages.
       viewer.result.current.__handleMessage({
         kind: 'presenter',
         from: 'other-presenter',
         name: 'Host',
         sharing: true,
       });
+    });
+    // Let the effect that mirrors remotePresenterId into a ref commit before
+    // sending the lock — the ref is what authorizes the lock message.
+    await flush();
+    act(() => {
       viewer.result.current.__handleMessage({
         kind: 'lock',
         from: 'other-presenter',
