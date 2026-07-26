@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { useMeetingStore, type Participant } from '@/store/meetingStore';
 import { toast } from 'sonner';
+import { logWebRTCEvent } from '@/lib/webrtcLogger';
 
 type PresenceRow = {
   display_name: string;
@@ -113,7 +114,14 @@ export function MeetingPresenceManager() {
       useMeetingStore.setState({ participants: mapParticipants(data, localSessionId) });
       previousRemoteIdsRef.current = remoteIds;
 
+      logWebRTCEvent('presence', 'refresh', {
+        total: data.length,
+        remote: remoteIds.length,
+        sessions: remoteIds,
+      });
+
       if (newParticipant) {
+        logWebRTCEvent('presence', 'peer-joined', { session: newParticipant.session_id, name: newParticipant.display_name });
         playParticipantTone();
         toast.success(`${newParticipant.display_name} joined the meeting`);
       }
