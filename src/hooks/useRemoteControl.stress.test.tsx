@@ -83,9 +83,10 @@ describe('useRemoteControl — deterministic stress: exact grant/denial counts',
     rand = seededPRNG(0xC0FFEE);
     uuid = () => pinnedUUID(rand);
 
-    // Freeze the clock. Date.now() and any setTimeout scheduling inside
-    // renderHook effects now advance only when we advance it.
-    vi.useFakeTimers();
+    // Freeze the wall clock ONLY. Leaving setTimeout/queueMicrotask real
+    // means renderHook effects and our own `flush` helper still tick
+    // normally — we're pinning nondeterminism, not stopping time.
+    vi.useFakeTimers({ toFake: ['Date'] });
     vi.setSystemTime(new Date(FIXED_NOW));
 
     // Replace crypto.randomUUID so the protocol's newNonce() is reproducible.

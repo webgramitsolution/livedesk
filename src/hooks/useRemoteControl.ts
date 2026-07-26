@@ -387,7 +387,10 @@ export function useRemoteControl(options: UseRemoteControlOptions) {
         case 'deny': {
           if (msg.to !== sessionId) return;
           const st = statusRef.current;
-          if (st.state === 'requesting' && st.presenterId !== msg.from) {
+          // Only a presenter we currently have an outstanding request with
+          // is allowed to deny us. An unsolicited deny from any other peer
+          // (idle state, or wrong presenter id) is dropped as unauthorized.
+          if (st.state !== 'requesting' || st.presenterId !== msg.from) {
             bumpDropped('unauthorized');
             return;
           }
