@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { MousePointer2, Hand, MonitorCog, KeyRound, X, Lock, Sliders, Activity } from 'lucide-react';
+import { MousePointer2, Hand, MonitorCog, KeyRound, X, Lock, Sliders, Activity, RefreshCw } from 'lucide-react';
 import type { UseRemoteControlReturn } from '@/hooks/useRemoteControl';
 import type { RCInputEvent } from '@/lib/remoteControl/protocol';
 import { RemoteControlSettingsPanel } from './RemoteControlSettingsPanel';
@@ -38,6 +38,7 @@ export function RemoteControlOverlay({ rc, meetingId }: RemoteControlOverlayProp
     controlLock,
     metrics,
     tuning,
+    sessionRestored,
     requestControl,
     cancelRequest,
     releaseControl,
@@ -261,6 +262,38 @@ export function RemoteControlOverlay({ rc, meetingId }: RemoteControlOverlayProp
             </span>
             <span className="rounded-full bg-primary/15 px-2 py-0.5 text-[10px] font-semibold text-primary">
               {controlLock.mode === 'mouse+keyboard' ? 'Mouse + Keyboard' : 'Mouse only'}
+            </span>
+          </div>
+        </div>
+      )}
+
+      {/* Transient "Session restored" pill — shown for ~6s after a
+          reconnect if useRemoteControl rehydrated non-trivial queue/lock/
+          pending-request state from sessionStorage. Sits below the lock
+          indicator so both remain visible when they coincide. */}
+      {sessionRestored && (
+        <div
+          data-testid="rc-restored-indicator"
+          className={cn(
+            'absolute left-3 pointer-events-auto',
+            controlLock ? 'top-14' : 'top-3',
+          )}
+          role="status"
+          aria-live="polite"
+        >
+          <div className="flex items-center gap-2 rounded-full border border-emerald-500/40 bg-emerald-500/10 px-3 py-1.5 text-xs text-emerald-700 dark:text-emerald-300 shadow-lg backdrop-blur">
+            <RefreshCw className="h-3.5 w-3.5" />
+            <span className="font-medium">Session restored</span>
+            <span className="text-[10px] opacity-80">
+              {sessionRestored.wasControlling
+                ? 'Your control resumed'
+                : sessionRestored.wasRequesting
+                  ? 'Your request is still pending'
+                  : sessionRestored.queueSize > 0
+                    ? `${sessionRestored.queueSize} request${sessionRestored.queueSize === 1 ? '' : 's'} restored`
+                    : sessionRestored.hadLock
+                      ? 'Control lock restored'
+                      : 'State restored'}
             </span>
           </div>
         </div>
