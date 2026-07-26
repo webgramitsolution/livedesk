@@ -3,6 +3,7 @@ import { supabase } from '@/integrations/supabase/client';
 import { useMeetingStore } from '@/store/meetingStore';
 import { createNoiseCancelledStream } from '@/lib/audio/noiseCancellation';
 import { toast } from 'sonner';
+import { logWebRTCEvent } from '@/lib/webrtcLogger';
 
 const ICE_SERVERS: RTCConfiguration = {
   iceServers: [
@@ -31,6 +32,19 @@ interface PeerConnection {
   peerId: string;
 }
 
+export interface PeerDiagnostic {
+  peerId: string;
+  connectionState: RTCPeerConnectionState;
+  iceState: RTCIceConnectionState;
+  hasAudio: boolean;
+  audioMuted: boolean;
+  audioEnabled: boolean;
+  audioLive: boolean;
+  hasVideo: boolean;
+  videoLive: boolean;
+  retries: number;
+}
+
 export function useWebRTC(meetingId: string, isInMeeting: boolean) {
   const localStreamRef = useRef<MediaStream | null>(null);
   const rawLocalStreamRef = useRef<MediaStream | null>(null);
@@ -39,6 +53,7 @@ export function useWebRTC(meetingId: string, isInMeeting: boolean) {
   const channelRef = useRef<ReturnType<typeof supabase.channel> | null>(null);
   const noiseCancellationCleanupRef = useRef<(() => void) | null>(null);
   const makingOfferRef = useRef<Map<string, boolean>>(new Map());
+  const retryStateRef = useRef<Map<string, { count: number; timer: ReturnType<typeof setTimeout> | null }>>(new Map());
   const myPeerIdRef = useRef<string>(crypto.randomUUID());
   const [localStream, setLocalStream] = useState<MediaStream | null>(null);
   const [screenStream, setScreenStream] = useState<MediaStream | null>(null);
@@ -115,6 +130,30 @@ export function useWebRTC(meetingId: string, isInMeeting: boolean) {
     return result;
   }, []);
 
+  const getPeerDiagnostics = useCallback((): PeerDiagnostic[] => {
+    const list: PeerDiagnostic[] = [];
+    peersRef.current.forEach((peer, id) => {
+      const receivers = peer.pc.getReceivers();
+      const audioReceiver = receivers.find((r) => r.track?.kind === 'audio');
+      const videoReceivers = receivers.filter((r) => r.track?.kind === 'video');
+      const audioTrack = audioReceiver?.track ?? null;
+      const videoTrack = videoReceivers[0]?.track ?? null;
+      list.push({
+        peerId: id,
+        connectionState: peer.pc.connectionState,
+        iceState: peer.pc.iceConnectionState,
+        hasAudio: !!audioTrack,
+        audioMuted: audioTrack ? audioTrack.muted : true,
+        audioEnabled: audioTrack ? audioTrack.enabled : false,
+        audioLive: audioTrack ? audioTrack.readyState === 'live' : false,
+        hasVideo: !!videoTrack,
+        videoLive: videoTrack ? videoTrack.readyState === 'live' : false,
+        retries: retryStateRef.current.get(id)?.count ?? 0,
+      });
+    });
+    return list;
+  }, []);
+
   const isLikelyScreenTrack = useCallback((track: MediaStreamTrack | null | undefined) => {
     if (!track || track.kind !== 'video') return false;
     const settings = typeof track.getSettings === 'function' ? track.getSettings() : {};
@@ -143,6 +182,9 @@ export function useWebRTC(meetingId: string, isInMeeting: boolean) {
     return myPeerIdRef.current.localeCompare(peerId) > 0;
   }, []);
 
+  // Schedule a re-subscribe / renegotiation if inbound tracks don't arrive.
+  const scheduleTrackRetryRef = useRef<(peerId: string) => void>(() => {});
+
   const createPeerConnection = useCallback(
     (peerId: string): RTCPeerConnection => {
       const existing = peersRef.current.get(peerId);
@@ -168,6 +210,7 @@ export function useWebRTC(meetingId: string, isInMeeting: boolean) {
 
       pc.onicecandidate = (event) => {
         if (event.candidate && channelRef.current) {
+          logWebRTCEvent('ice', 'local-candidate', { type: event.candidate.type }, peerId);
           channelRef.current.send({
             type: 'broadcast',
             event: 'ice-candidate',
@@ -183,6 +226,12 @@ export function useWebRTC(meetingId: string, isInMeeting: boolean) {
       pc.ontrack = (event) => {
         const track = event.track;
         const incomingStream = event.streams[0];
+        logWebRTCEvent(
+          'track',
+          'remote-track',
+          { kind: track.kind, muted: track.muted, enabled: track.enabled, readyState: track.readyState },
+          peerId,
+        );
         const videoReceiverCount = pc
           .getReceivers()
           .filter((receiver) => receiver.track?.kind === 'video').length;
@@ -191,18 +240,40 @@ export function useWebRTC(meetingId: string, isInMeeting: boolean) {
           setRemoteScreenStream(incomingStream);
           track.addEventListener('ended', () => setRemoteScreenStream((current) => (current === incomingStream ? null : current)));
         }
+        track.addEventListener('mute', () =>
+          logWebRTCEvent('track', 'remote-track-muted', { kind: track.kind }, peerId),
+        );
+        track.addEventListener('unmute', () =>
+          logWebRTCEvent('track', 'remote-track-unmuted', { kind: track.kind }, peerId),
+        );
+        track.addEventListener('ended', () =>
+          logWebRTCEvent('track', 'remote-track-ended', { kind: track.kind }, peerId),
+        );
         updateRemoteStreams();
       };
 
       pc.onconnectionstatechange = () => {
+        logWebRTCEvent('peer', 'connection-state', { state: pc.connectionState }, peerId);
         if (pc.connectionState === 'disconnected' || pc.connectionState === 'failed') {
+          const retry = retryStateRef.current.get(peerId);
+          if (retry?.timer) clearTimeout(retry.timer);
+          retryStateRef.current.delete(peerId);
           peersRef.current.delete(peerId);
           makingOfferRef.current.delete(peerId);
           updateRemoteStreams();
+        } else if (pc.connectionState === 'connected') {
+          // Verify tracks arrived; if not, kick a retry.
+          scheduleTrackRetryRef.current(peerId);
         }
       };
 
+      pc.oniceconnectionstatechange = () => {
+        logWebRTCEvent('ice', 'state', { state: pc.iceConnectionState }, peerId);
+      };
+
       peersRef.current.set(peerId, { pc, peerId });
+      logWebRTCEvent('peer', 'created', undefined, peerId);
+      scheduleTrackRetryRef.current(peerId);
       return pc;
     },
     [isLikelyScreenTrack, updateRemoteStreams]
@@ -229,6 +300,7 @@ export function useWebRTC(meetingId: string, isInMeeting: boolean) {
       const answer = await pc.createAnswer();
       await pc.setLocalDescription(answer);
 
+      logWebRTCEvent('signal', 'send-answer', undefined, from);
       channelRef.current?.send({
         type: 'broadcast',
         event: 'answer',
@@ -284,6 +356,7 @@ export function useWebRTC(meetingId: string, isInMeeting: boolean) {
 
         await pc.setLocalDescription(offer);
 
+        logWebRTCEvent('signal', 'send-offer', undefined, peerId);
         channelRef.current?.send({
           type: 'broadcast',
           event: 'offer',
@@ -299,6 +372,55 @@ export function useWebRTC(meetingId: string, isInMeeting: boolean) {
     },
     [createPeerConnection]
   );
+
+  // Auto-retry / resubscribe: if inbound audio+video haven't arrived within
+  // 1.5s after a peer becomes known, renegotiate. Retries up to 3 times.
+  const scheduleTrackRetry = useCallback(
+    (peerId: string) => {
+      const existing = retryStateRef.current.get(peerId);
+      if (existing?.timer) clearTimeout(existing.timer);
+      const state = existing ?? { count: 0, timer: null };
+      state.timer = setTimeout(() => {
+        const peer = peersRef.current.get(peerId);
+        if (!peer) return;
+        const receivers = peer.pc.getReceivers();
+        const hasAudio = receivers.some((r) => r.track?.kind === 'audio' && r.track.readyState === 'live');
+        const hasVideo = receivers.some((r) => r.track?.kind === 'video' && r.track.readyState === 'live');
+        if (hasAudio && hasVideo) {
+          logWebRTCEvent('retry', 'tracks-ok', { hasAudio, hasVideo }, peerId);
+          return;
+        }
+        if (state.count >= 3) {
+          logWebRTCEvent('retry', 'give-up', { hasAudio, hasVideo }, peerId);
+          return;
+        }
+        state.count += 1;
+        logWebRTCEvent('retry', 'resubscribe', { attempt: state.count, hasAudio, hasVideo }, peerId);
+        // Ensure local tracks are attached and renegotiate.
+        if (localStreamRef.current) {
+          const senders = peer.pc.getSenders();
+          localStreamRef.current.getTracks().forEach((track) => {
+            if (!senders.some((s) => s.track === track)) {
+              try {
+                peer.pc.addTrack(track, localStreamRef.current!);
+              } catch {
+                /* ignore */
+              }
+            }
+          });
+        }
+        void sendOfferToPeer(peerId);
+        // Schedule next check.
+        scheduleTrackRetry(peerId);
+      }, 1500);
+      retryStateRef.current.set(peerId, state);
+    },
+    [sendOfferToPeer],
+  );
+
+  useEffect(() => {
+    scheduleTrackRetryRef.current = scheduleTrackRetry;
+  }, [scheduleTrackRetry]);
 
   // Start screen sharing
   const startScreenShare = useCallback(async () => {
@@ -554,17 +676,20 @@ export function useWebRTC(meetingId: string, isInMeeting: boolean) {
 
     channel
       .on('broadcast', { event: 'join' }, ({ payload }) => {
+        logWebRTCEvent('signal', 'recv-join', { from: payload.peerId });
         if (payload.peerId !== myPeerIdRef.current && myPeerIdRef.current.localeCompare(payload.peerId) < 0) {
           sendOfferToPeer(payload.peerId);
         }
       })
       .on('broadcast', { event: 'offer' }, ({ payload }) => {
         if (payload.to === myPeerIdRef.current) {
+          logWebRTCEvent('signal', 'recv-offer', undefined, payload.from);
           handleOffer(payload.from, payload.offer);
         }
       })
       .on('broadcast', { event: 'answer' }, ({ payload }) => {
         if (payload.to === myPeerIdRef.current) {
+          logWebRTCEvent('signal', 'recv-answer', undefined, payload.from);
           handleAnswer(payload.from, payload.answer);
         }
       })
@@ -574,6 +699,7 @@ export function useWebRTC(meetingId: string, isInMeeting: boolean) {
         }
       })
       .on('broadcast', { event: 'leave' }, ({ payload }) => {
+        logWebRTCEvent('signal', 'recv-leave', undefined, payload.peerId);
         const peer = peersRef.current.get(payload.peerId);
         if (peer) {
           peer.pc.close();
@@ -583,12 +709,14 @@ export function useWebRTC(meetingId: string, isInMeeting: boolean) {
         }
       })
       .subscribe((status) => {
+        logWebRTCEvent('signal', 'channel-status', { status });
         if (status === 'SUBSCRIBED') {
           channel.send({
             type: 'broadcast',
             event: 'join',
             payload: { peerId: myPeerIdRef.current },
           });
+          logWebRTCEvent('signal', 'send-join');
         }
       });
 
@@ -610,5 +738,13 @@ export function useWebRTC(meetingId: string, isInMeeting: boolean) {
     };
   }, [isInMeeting, localStream, meetingId, sendOfferToPeer, handleOffer, handleAnswer, handleIceCandidate, updateRemoteStreams]);
 
-  return { localStream, remoteStreams, screenStream, remoteScreenStream, myPeerId: myPeerIdRef.current, getPeerStats };
+  return {
+    localStream,
+    remoteStreams,
+    screenStream,
+    remoteScreenStream,
+    myPeerId: myPeerIdRef.current,
+    getPeerStats,
+    getPeerDiagnostics,
+  };
 }
