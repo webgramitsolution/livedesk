@@ -10,7 +10,8 @@
     "lint": "eslint .",
     "preview": "vite preview",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "test:electron": "bash scripts/electron-rc-integration.sh"
   },
   "dependencies": {
     "@elevenlabs/react": "^0.15.0",
