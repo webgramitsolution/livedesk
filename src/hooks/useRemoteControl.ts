@@ -293,26 +293,28 @@ export function useRemoteControl(options: UseRemoteControlOptions) {
         case 'request': {
           if (msg.to !== sessionId) return;
           if (!isLocalPresenterRef.current) return;
-          let added = false;
-          setRequestQueue((prev) => {
-            if (prev.some((r) => r.from === msg.from)) return prev;
-            added = true;
-            return [...prev, { from: msg.from, name: msg.name, requestedAt: Date.now() }];
-          });
-          if (added) {
-            logRCAudit({
-              action: 'queue-added',
-              actorId: msg.from,
-              actorName: msg.name,
-              targetId: sessionId,
-              meetingId,
-            });
-            toast(`${msg.name} wants to control your screen`, {
-              description: 'Open the presenter panel to accept or deny.',
-              duration: 8000,
-            });
-            logWebRTCEvent('signal', 'rc-request', { from: msg.from });
+          // Dedup synchronously via ref so we don't double-log audit
+          // entries when a viewer's request message arrives more than once
+          // (React batches the queue setter, so a functional dedup inside
+          // the updater can't drive side-effects out here reliably).
+          if (requestQueueRef.current.some((r) => r.from === msg.from)) {
+            break;
           }
+          const newEntry: IncomingRequest = { from: msg.from, name: msg.name, requestedAt: Date.now() };
+          requestQueueRef.current = [...requestQueueRef.current, newEntry];
+          setRequestQueue(requestQueueRef.current);
+          logRCAudit({
+            action: 'queue-added',
+            actorId: msg.from,
+            actorName: msg.name,
+            targetId: sessionId,
+            meetingId,
+          });
+          toast(`${msg.name} wants to control your screen`, {
+            description: 'Open the presenter panel to accept or deny.',
+            duration: 8000,
+          });
+          logWebRTCEvent('signal', 'rc-request', { from: msg.from });
           break;
         }
         case 'cancel': {
