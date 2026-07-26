@@ -86,11 +86,17 @@ describe('useRemoteControl — stress: rapid disconnect/reconnect + concurrent r
     //    (or in this case, the presenter's own tab) flapping. Each remount
     //    reads the persisted snapshot from sessionStorage.
     for (let cycle = 0; cycle < 5; cycle += 1) {
+      // eslint-disable-next-line no-console
+      console.log('cycle', cycle, 'before-unmount storage=', window.sessionStorage.getItem('rc-state:stress-meeting:presenter-session')?.slice(0, 60));
       hook.unmount();
+      // eslint-disable-next-line no-console
+      console.log('cycle', cycle, 'after-unmount  storage=', window.sessionStorage.getItem('rc-state:stress-meeting:presenter-session')?.slice(0, 60));
       hook = renderHook(() =>
         useRemoteControl({ meetingId, isInMeeting: true, isLocalPresenter: true }),
       );
       await flush();
+      // eslint-disable-next-line no-console
+      console.log('cycle', cycle, 'after-remount  queue=', hook.result.current.requestQueue.length);
       // Queue must survive every reconnect exactly as it was.
       expect(hook.result.current.requestQueue).toHaveLength(8);
     }
