@@ -98,8 +98,9 @@ describe('useRemoteControl — deterministic stress: exact grant/denial counts',
   });
 
   afterEach(() => {
-    // @ts-expect-error — restore original.
-    if (realRandomUUID) crypto.randomUUID = realRandomUUID;
+    if (realRandomUUID) {
+      (crypto as unknown as { randomUUID: typeof crypto.randomUUID }).randomUUID = realRandomUUID;
+    }
     vi.useRealTimers();
     vi.restoreAllMocks();
   });
