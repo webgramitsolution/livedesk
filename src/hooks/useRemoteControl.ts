@@ -293,22 +293,26 @@ export function useRemoteControl(options: UseRemoteControlOptions) {
         case 'request': {
           if (msg.to !== sessionId) return;
           if (!isLocalPresenterRef.current) return;
+          let added = false;
           setRequestQueue((prev) => {
             if (prev.some((r) => r.from === msg.from)) return prev;
+            added = true;
             return [...prev, { from: msg.from, name: msg.name, requestedAt: Date.now() }];
           });
-          logRCAudit({
-            action: 'queue-added',
-            actorId: msg.from,
-            actorName: msg.name,
-            targetId: sessionId,
-            meetingId,
-          });
-          toast(`${msg.name} wants to control your screen`, {
-            description: 'Open the presenter panel to accept or deny.',
-            duration: 8000,
-          });
-          logWebRTCEvent('signal', 'rc-request', { from: msg.from });
+          if (added) {
+            logRCAudit({
+              action: 'queue-added',
+              actorId: msg.from,
+              actorName: msg.name,
+              targetId: sessionId,
+              meetingId,
+            });
+            toast(`${msg.name} wants to control your screen`, {
+              description: 'Open the presenter panel to accept or deny.',
+              duration: 8000,
+            });
+            logWebRTCEvent('signal', 'rc-request', { from: msg.from });
+          }
           break;
         }
         case 'cancel': {
