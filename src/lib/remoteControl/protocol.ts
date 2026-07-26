@@ -23,7 +23,17 @@ export type RCMessage =
   // Presenter or viewer ends the session.
   | { kind: 'revoke'; from: string; to: string; reason?: string }
   // Real input events (only honored by presenter for the currently-granted controller with matching nonce).
-  | { kind: 'input'; from: string; to: string; nonce: string; event: RCInputEvent };
+  | { kind: 'input'; from: string; to: string; nonce: string; event: RCInputEvent }
+  // Presenter announces the current control lock (who has control + mode).
+  // Broadcast to everyone in the meeting so all participants see the indicator.
+  | {
+      kind: 'lock';
+      from: string; // presenter id
+      presenterName: string;
+      controllerId: string | null;
+      controllerName: string | null;
+      mode: 'mouse' | 'mouse+keyboard' | null;
+    };
 
 export type RCInputEvent =
   | { type: 'mousemove'; x: number; y: number }
