@@ -1,4 +1,4 @@
-import { MicOff, VideoOff, Hand, Languages, Volume2 } from 'lucide-react';
+import { MicOff, VideoOff, Hand, Languages, Volume2, VolumeX, AlertTriangle } from 'lucide-react';
 import { type Participant, type FloatingReaction, useMeetingStore } from '@/store/meetingStore';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useEffect, useMemo, useState, useRef } from 'react';
@@ -130,6 +130,18 @@ export function VideoTile({ participant, subtitle, compact, mediaStream }: Video
   const hasVideoTrack = mediaStream?.getVideoTracks().some((t) => t.enabled && t.readyState === 'live');
   const showRealVideo = participant.isCameraOn && mediaStream && hasVideoTrack;
 
+  // Audio subscription diagnostic (remote peers only).
+  const audioDiagnostic = useMemo(() => {
+    if (participant.id === '1' || !mediaStream) return null;
+    const tracks = mediaStream.getAudioTracks();
+    if (tracks.length === 0) return { tone: 'text-destructive', Icon: VolumeX, label: 'No audio' };
+    const t = tracks[0];
+    if (t.readyState !== 'live') return { tone: 'text-destructive', Icon: AlertTriangle, label: 'Audio failing' };
+    if (t.muted) return { tone: 'text-amber-400', Icon: VolumeX, label: 'Muted by sender' };
+    if (!t.enabled) return { tone: 'text-amber-400', Icon: VolumeX, label: 'Audio disabled' };
+    return { tone: 'text-success', Icon: Volume2, label: 'Audio OK' };
+  }, [mediaStream, participant.id]);
+
   return (
     <motion.div
       initial={{ opacity: 0, scale: 0.95 }}
@@ -142,6 +154,19 @@ export function VideoTile({ participant, subtitle, compact, mediaStream }: Video
       {mediaStream && participant.id !== '1' ? (
         <audio ref={audioRef} autoPlay playsInline />
       ) : null}
+
+      {audioDiagnostic && !compact && (
+        <div
+          className="absolute top-3 right-3 z-10 flex items-center gap-1 rounded-full bg-black/50 px-1.5 py-0.5 backdrop-blur-sm"
+          title={audioDiagnostic.label}
+          aria-label={`${participant.name} — ${audioDiagnostic.label}`}
+        >
+          <audioDiagnostic.Icon className={`h-3 w-3 ${audioDiagnostic.tone}`} />
+          <span className={`text-[9px] font-medium ${audioDiagnostic.tone}`}>
+            {audioDiagnostic.label}
+          </span>
+        </div>
+      )}
 
       {showRealVideo ? (
         <video
