@@ -170,7 +170,7 @@ export function VideoGrid({ localStream, remoteStreams, screenStream, remoteScre
             </div>
           )}
           {/* Remote-control cursor + input overlay */}
-          <RemoteControlOverlay rc={rc} />
+          <RemoteControlOverlay rc={rc} meetingId={meetingId} />
           {isScreenSharing && (
             <div className="pointer-events-none absolute bottom-4 inset-x-0 mx-auto z-20 flex w-[min(calc(100%-1rem),28rem)] justify-center">
               <div className="pointer-events-auto flex items-center gap-2 rounded-full border border-border bg-background/95 px-2.5 py-2 backdrop-blur-md control-bar-elevated">
