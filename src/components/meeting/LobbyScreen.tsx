@@ -212,10 +212,8 @@ export function LobbyScreen() {
       {/* Top Bar */}
       <header className="flex items-center justify-between px-4 sm:px-6 py-3 border-b border-border sticky top-0 bg-background/95 backdrop-blur-sm z-10">
         <div className="flex items-center gap-2">
-          <div className="w-9 h-9 rounded-xl bg-primary flex items-center justify-center">
-            <Video className="w-5 h-5 text-primary-foreground" />
-          </div>
-          <span className="font-display font-bold text-base sm:text-lg text-foreground">Zoom Connect</span>
+          <img src="/logo.png" alt="LiveDesk logo" className="w-9 h-9 rounded-xl object-contain" />
+          <span className="font-display font-bold text-base sm:text-lg text-foreground">LiveDesk</span>
         </div>
         {userEmail && (
           <div className="flex items-center gap-2">

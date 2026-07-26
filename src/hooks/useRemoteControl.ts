@@ -8,6 +8,7 @@ import {
   RC_EVENT,
   colorForId,
   newNonce,
+  wrapRC,
   type RCButton,
   type RCInputEvent,
   type RCMessage,
@@ -120,6 +121,14 @@ export function useRemoteControl(options: UseRemoteControlOptions) {
     remotePresenterIdRef.current = remotePresenterId;
   }, [remotePresenterId]);
   const grantLatencySamples = useRef<number[]>([]);
+  const requestQueueRef = useRef<IncomingRequest[]>([]);
+  useEffect(() => {
+    requestQueueRef.current = requestQueue;
+  }, [requestQueue]);
+  const controlLockRef = useRef<ControlLock | null>(null);
+  useEffect(() => {
+    controlLockRef.current = controlLock;
+  }, [controlLock]);
 
   const channelRef = useRef<ReturnType<typeof supabase.channel> | null>(null);
   const optionsMeetingIdRef = useRef(meetingId);
@@ -179,7 +188,8 @@ export function useRemoteControl(options: UseRemoteControlOptions) {
 
   const send = useCallback((msg: RCMessage) => {
     if (!channelRef.current || !readyRef.current) return;
-    channelRef.current.send({ type: 'broadcast', event: RC_EVENT, payload: msg });
+    const signed = wrapRC(msg, optionsMeetingIdRef.current);
+    channelRef.current.send({ type: 'broadcast', event: RC_EVENT, payload: signed });
   }, []);
 
   // Presenter-only: broadcast the current control lock to everyone.
@@ -201,7 +211,7 @@ export function useRemoteControl(options: UseRemoteControlOptions) {
   // --- Message router ---
   const handleMessage = useCallback(
     (raw: unknown) => {
-      const msg = validateRCMessage(raw);
+      const msg = validateRCMessage(raw, { meetingId });
       if (!msg) {
         bumpDropped('invalid');
         return;
@@ -283,10 +293,16 @@ export function useRemoteControl(options: UseRemoteControlOptions) {
         case 'request': {
           if (msg.to !== sessionId) return;
           if (!isLocalPresenterRef.current) return;
-          setRequestQueue((prev) => {
-            if (prev.some((r) => r.from === msg.from)) return prev;
-            return [...prev, { from: msg.from, name: msg.name, requestedAt: Date.now() }];
-          });
+          // Dedup synchronously via ref so we don't double-log audit
+          // entries when a viewer's request message arrives more than once
+          // (React batches the queue setter, so a functional dedup inside
+          // the updater can't drive side-effects out here reliably).
+          if (requestQueueRef.current.some((r) => r.from === msg.from)) {
+            break;
+          }
+          const newEntry: IncomingRequest = { from: msg.from, name: msg.name, requestedAt: Date.now() };
+          requestQueueRef.current = [...requestQueueRef.current, newEntry];
+          setRequestQueue(requestQueueRef.current);
           logRCAudit({
             action: 'queue-added',
             actorId: msg.from,
@@ -463,7 +479,14 @@ export function useRemoteControl(options: UseRemoteControlOptions) {
 
   useEffect(() => {
     return () => {
-      if (meetingId && sessionId && status.state === 'idle' && !activeController && !controlLock && requestQueue.length === 0) {
+      // Read the LATEST state via refs — the effect only depends on
+      // meetingId/sessionId, so the destroy closure would otherwise capture
+      // the empty state that existed at mount and wipe a live queue.
+      const st = statusRef.current;
+      const ac = activeControllerRef.current;
+      const q = requestQueueRef.current;
+      const lock = controlLockRef.current;
+      if (meetingId && sessionId && st.state === 'idle' && !ac && !lock && q.length === 0) {
         clearRCState(meetingId, sessionId);
       }
     };

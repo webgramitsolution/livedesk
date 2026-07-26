@@ -32,12 +32,24 @@ vi.mock('@/integrations/supabase/client', () => {
 
 import { useRemoteControl } from './useRemoteControl';
 import { clearRCAudit, getRCAudit } from '@/lib/remoteControl/auditLog';
+import { signRC, newNonce } from '@/lib/remoteControl/protocol';
+import { resetRCReplayWindow } from '@/lib/remoteControl/validation';
+
+// Helper: build a fully-signed envelope for the current meeting so validation
+// (msgId + ts + sig + replay) accepts the injected message.
+function wire<T extends { kind: string; from: string }>(meetingId: string, msg: T) {
+  const msgId = newNonce();
+  const ts = Date.now();
+  const sig = signRC({ kind: msg.kind, from: msg.from, msgId, ts, meetingId });
+  return { ...msg, msgId, ts, sig };
+}
 
 const flush = () => new Promise((r) => setTimeout(r, 0));
 
 describe('useRemoteControl — multi-viewer queue, audit log, lock', () => {
   beforeEach(() => {
     clearRCAudit();
+    resetRCReplayWindow();
     window.sessionStorage.clear();
     window.localStorage.clear();
   });
@@ -55,25 +67,16 @@ describe('useRemoteControl — multi-viewer queue, audit log, lock', () => {
 
     // Simulate two viewers requesting control at different times.
     act(() => {
-      result.current.__handleMessage({
-        kind: 'request',
-        from: 'viewer-1',
-        name: 'Alice',
-        to: 'presenter-session',
-      });
-      result.current.__handleMessage({
-        kind: 'request',
-        from: 'viewer-2',
-        name: 'Bob',
-        to: 'presenter-session',
-      });
+      result.current.__handleMessage(
+        wire('meeting-A', { kind: 'request', from: 'viewer-1', name: 'Alice', to: 'presenter-session' }),
+      );
+      result.current.__handleMessage(
+        wire('meeting-A', { kind: 'request', from: 'viewer-2', name: 'Bob', to: 'presenter-session' }),
+      );
       // Duplicate request from viewer-1 must be deduped.
-      result.current.__handleMessage({
-        kind: 'request',
-        from: 'viewer-1',
-        name: 'Alice',
-        to: 'presenter-session',
-      });
+      result.current.__handleMessage(
+        wire('meeting-A', { kind: 'request', from: 'viewer-1', name: 'Alice', to: 'presenter-session' }),
+      );
     });
 
     expect(result.current.requestQueue.map((r) => r.from)).toEqual(['viewer-1', 'viewer-2']);
@@ -107,25 +110,24 @@ describe('useRemoteControl — multi-viewer queue, audit log, lock', () => {
     );
     await flush();
     act(() => {
-      viewer.result.current.__handleMessage({
-        kind: 'presenter',
-        from: 'other-presenter',
-        name: 'Host',
-        sharing: true,
-      });
+      viewer.result.current.__handleMessage(
+        wire('meeting-A', { kind: 'presenter', from: 'other-presenter', name: 'Host', sharing: true }),
+      );
     });
     // Let the effect that mirrors remotePresenterId into a ref commit before
     // sending the lock — the ref is what authorizes the lock message.
     await flush();
     act(() => {
-      viewer.result.current.__handleMessage({
-        kind: 'lock',
-        from: 'other-presenter',
-        presenterName: 'Host',
-        controllerId: 'viewer-2',
-        controllerName: 'Bob',
-        mode: 'mouse+keyboard',
-      });
+      viewer.result.current.__handleMessage(
+        wire('meeting-A', {
+          kind: 'lock',
+          from: 'other-presenter',
+          presenterName: 'Host',
+          controllerId: 'viewer-2',
+          controllerName: 'Bob',
+          mode: 'mouse+keyboard',
+        }),
+      );
     });
     expect(viewer.result.current.controlLock).toEqual({
       presenterId: 'other-presenter',
@@ -144,14 +146,16 @@ describe('useRemoteControl — multi-viewer queue, audit log, lock', () => {
 
     act(() => {
       // No presenter registered yet — a random peer trying to claim the lock is dropped.
-      result.current.__handleMessage({
-        kind: 'lock',
-        from: 'impostor',
-        presenterName: 'Fake',
-        controllerId: 'x',
-        controllerName: 'Y',
-        mode: 'mouse',
-      });
+      result.current.__handleMessage(
+        wire('meeting-B', {
+          kind: 'lock',
+          from: 'impostor',
+          presenterName: 'Fake',
+          controllerId: 'x',
+          controllerName: 'Y',
+          mode: 'mouse',
+        }),
+      );
     });
 
     expect(result.current.controlLock).toBeNull();
@@ -165,13 +169,20 @@ describe('useRemoteControl — multi-viewer queue, audit log, lock', () => {
     await flush();
 
     act(() => {
-      // Missing required fields.
+      // Missing required fields / envelope.
       result.current.__handleMessage({ kind: 'request', from: 'viewer-9' });
       result.current.__handleMessage(null);
       result.current.__handleMessage({ foo: 'bar' });
+      // Signed but wrong meeting — signature won't match ctx.meetingId.
+      result.current.__handleMessage(
+        wire('other-meeting', { kind: 'request', from: 'viewer-9', name: 'Zed', to: 'presenter-session' }),
+      );
+      // Tampered signature.
+      const good = wire('meeting-C', { kind: 'request', from: 'viewer-9', name: 'Zed', to: 'presenter-session' });
+      result.current.__handleMessage({ ...good, sig: '00000000' });
     });
 
     expect(result.current.requestQueue).toEqual([]);
-    expect(result.current.metrics.droppedInboundInvalid).toBeGreaterThanOrEqual(3);
+    expect(result.current.metrics.droppedInboundInvalid).toBeGreaterThanOrEqual(5);
   });
 });

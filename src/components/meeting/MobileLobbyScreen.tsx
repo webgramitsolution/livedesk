@@ -40,10 +40,8 @@ export function MobileLobbyScreen({
       {/* Header */}
       <header className="sticky top-0 z-20 bg-background/90 backdrop-blur-md px-5 pt-4 pb-3 flex items-center justify-between">
         <div className="flex items-center gap-2.5">
-          <div className="w-10 h-10 rounded-xl bg-primary flex items-center justify-center shadow-sm">
-            <Video className="w-5 h-5 text-primary-foreground" />
-          </div>
-          <span className="font-display font-bold text-lg text-foreground">Zoom Connect</span>
+          <img src="/logo.png" alt="LiveDesk logo" className="w-10 h-10 rounded-xl object-contain shadow-sm" />
+          <span className="font-display font-bold text-lg text-foreground">LiveDesk</span>
         </div>
         <div className="flex items-center gap-3">
           <button
