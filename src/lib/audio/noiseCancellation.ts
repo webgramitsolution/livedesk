@@ -21,6 +21,9 @@ export function createNoiseCancelledStream(sourceStream: MediaStream): NoiseCanc
   }
 
   const audioContext = new AudioContextCtor();
+  if (audioContext.state === 'suspended') {
+    void audioContext.resume().catch(() => undefined);
+  }
   const audioOnlyStream = new MediaStream(audioTracks);
   const sourceNode = audioContext.createMediaStreamSource(audioOnlyStream);
 
