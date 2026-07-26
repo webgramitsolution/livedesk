@@ -4,6 +4,9 @@ import { WhiteboardOverlay } from './WhiteboardOverlay';
 import { motion } from 'framer-motion';
 import { Monitor, X, PenTool } from 'lucide-react';
 import { useState, useEffect, useRef } from 'react';
+import { RemoteControlOverlay } from './RemoteControlOverlay';
+import { useRemoteControl } from '@/hooks/useRemoteControl';
+import { executeInput } from '@/lib/remoteControl/inputExecutor';
 
 interface VideoGridProps {
   localStream?: MediaStream | null;
@@ -36,10 +39,23 @@ function ScreenShareVideo({ stream, isLocal }: { stream: MediaStream; isLocal?: 
 }
 
 export function VideoGrid({ localStream, remoteStreams, screenStream, remoteScreenStream }: VideoGridProps) {
-  const { participants, transcript, isTranslationEnabled, isScreenSharing, isSelfCapture, toggleScreenShare, selectedLanguage } =
+  const { participants, transcript, isTranslationEnabled, isScreenSharing, isSelfCapture, toggleScreenShare, selectedLanguage, meetingId } =
     useMeetingStore();
   const [whiteboardActive, setWhiteboardActive] = useState(false);
   const [toolbarPortalWindow, setToolbarPortalWindow] = useState<Window | null>(null);
+
+  // Remote-control: overlay is active whenever there is a shared screen
+  // (local or remote). The overlay both broadcasts our cursor and, when
+  // control has been granted, executes real input on the presenter side.
+  const rc = useRemoteControl({
+    meetingId,
+    isInMeeting: true,
+    isLocalPresenter: isScreenSharing,
+    onExecuteInput: (event) => {
+      // Presenter side: dispatch the incoming input into the tab.
+      executeInput(event);
+    },
+  });
 
   // Suppress the local live preview when the presenter is capturing this very tab,
   // otherwise we render a "hall of mirrors" recursion. Remote peers still receive
@@ -153,6 +169,8 @@ export function VideoGrid({ localStream, remoteStreams, screenStream, remoteScre
               )}
             </div>
           )}
+          {/* Remote-control cursor + input overlay */}
+          <RemoteControlOverlay rc={rc} />
           {isScreenSharing && (
             <div className="pointer-events-none absolute bottom-4 inset-x-0 mx-auto z-20 flex w-[min(calc(100%-1rem),28rem)] justify-center">
               <div className="pointer-events-auto flex items-center gap-2 rounded-full border border-border bg-background/95 px-2.5 py-2 backdrop-blur-md control-bar-elevated">
