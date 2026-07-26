@@ -1,9 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { MousePointer2, Hand, MonitorCog, KeyRound, X, Lock, Download, Sliders, Activity } from 'lucide-react';
+import { MousePointer2, Hand, MonitorCog, KeyRound, X, Lock, Sliders, Activity } from 'lucide-react';
 import type { UseRemoteControlReturn } from '@/hooks/useRemoteControl';
 import type { RCInputEvent } from '@/lib/remoteControl/protocol';
-import { downloadRCAudit } from '@/lib/remoteControl/auditLog';
 import { RemoteControlSettingsPanel } from './RemoteControlSettingsPanel';
 import { cn } from '@/lib/utils';
 
@@ -283,13 +282,6 @@ export function RemoteControlOverlay({ rc, meetingId }: RemoteControlOverlayProp
             className="inline-flex items-center gap-1 rounded-full border border-border bg-background/80 px-2.5 py-1 text-[10px] font-medium text-muted-foreground shadow hover:bg-muted backdrop-blur"
           >
             <Sliders className="h-3 w-3" /> Tune
-          </button>
-          <button
-            onClick={() => downloadRCAudit('rc-session')}
-            title="Download remote-control audit log"
-            className="inline-flex items-center gap-1 rounded-full border border-border bg-background/80 px-2.5 py-1 text-[10px] font-medium text-muted-foreground shadow hover:bg-muted backdrop-blur"
-          >
-            <Download className="h-3 w-3" /> Audit
           </button>
         </div>
 

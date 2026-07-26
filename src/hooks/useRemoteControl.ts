@@ -8,6 +8,7 @@ import {
   RC_EVENT,
   colorForId,
   newNonce,
+  wrapRC,
   type RCButton,
   type RCInputEvent,
   type RCMessage,
@@ -179,7 +180,8 @@ export function useRemoteControl(options: UseRemoteControlOptions) {
 
   const send = useCallback((msg: RCMessage) => {
     if (!channelRef.current || !readyRef.current) return;
-    channelRef.current.send({ type: 'broadcast', event: RC_EVENT, payload: msg });
+    const signed = wrapRC(msg, optionsMeetingIdRef.current);
+    channelRef.current.send({ type: 'broadcast', event: RC_EVENT, payload: signed });
   }, []);
 
   // Presenter-only: broadcast the current control lock to everyone.
@@ -201,7 +203,7 @@ export function useRemoteControl(options: UseRemoteControlOptions) {
   // --- Message router ---
   const handleMessage = useCallback(
     (raw: unknown) => {
-      const msg = validateRCMessage(raw);
+      const msg = validateRCMessage(raw, { meetingId });
       if (!msg) {
         bumpDropped('invalid');
         return;

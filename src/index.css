@@ -15,7 +15,7 @@
     --popover: 0 0% 100%;
     --popover-foreground: 210 11% 15%;
 
-    --primary: 217 89% 50%;
+    --primary: 226 79% 15%;
     --primary-foreground: 0 0% 100%;
 
     --secondary: 210 14% 96%;
@@ -24,7 +24,7 @@
     --muted: 210 14% 96%;
     --muted-foreground: 213 5% 39%;
 
-    --accent: 217 89% 50%;
+    --accent: 226 79% 15%;
     --accent-foreground: 0 0% 100%;
 
     --destructive: 4 80% 49%;
@@ -35,18 +35,18 @@
 
     --border: 210 18% 91%;
     --input: 210 18% 91%;
-    --ring: 217 89% 50%;
+    --ring: 226 79% 15%;
 
     --radius: 0.75rem;
 
     --sidebar-background: 0 0% 100%;
     --sidebar-foreground: 210 11% 15%;
-    --sidebar-primary: 217 89% 50%;
+    --sidebar-primary: 226 79% 15%;
     --sidebar-primary-foreground: 0 0% 100%;
     --sidebar-accent: 210 14% 96%;
     --sidebar-accent-foreground: 210 11% 15%;
     --sidebar-border: 210 18% 91%;
-    --sidebar-ring: 217 89% 50%;
+    --sidebar-ring: 226 79% 15%;
 
     /* Custom tokens */
     --video-bg: 210 11% 13%;
@@ -54,7 +54,7 @@
     --tile-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
     --glass-bg: 0 0% 0% / 0.6;
     --glass-blur: 4px;
-    --glow-primary: 0 0 0 2px hsl(217 89% 50%);
+    --glow-primary: 0 0 0 2px hsl(226 79% 15%);
     --subtitle-bg: 0 0% 0% / 0.65;
 
     font-family: 'Roboto', 'Google Sans', system-ui, sans-serif;
@@ -67,7 +67,7 @@
     --card-foreground: 210 40% 98%;
     --popover: 210 11% 17%;
     --popover-foreground: 210 40% 98%;
-    --primary: 217 89% 50%;
+    --primary: 226 79% 40%;
     --primary-foreground: 0 0% 100%;
     --secondary: 217 33% 17%;
     --secondary-foreground: 210 40% 98%;
@@ -84,12 +84,12 @@
     --ring: 212 27% 84%;
     --sidebar-background: 210 11% 10%;
     --sidebar-foreground: 210 40% 98%;
-    --sidebar-primary: 217 89% 50%;
+    --sidebar-primary: 226 79% 40%;
     --sidebar-primary-foreground: 0 0% 100%;
     --sidebar-accent: 217 33% 17%;
     --sidebar-accent-foreground: 210 40% 98%;
     --sidebar-border: 217 33% 17%;
-    --sidebar-ring: 217 89% 50%;
+    --sidebar-ring: 226 79% 40%;
     --video-bg: 210 11% 8%;
   }
 }
