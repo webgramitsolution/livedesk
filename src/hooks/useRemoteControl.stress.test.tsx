@@ -209,6 +209,11 @@ describe('useRemoteControl — deterministic stress: exact grant/denial counts',
             ),
           );
         }
+      });
+      // Let React commit the queue state before invoking grantRequest —
+      // otherwise the useCallback closure sees an empty queue and no-ops.
+      await flush();
+      act(() => {
         hook.result.current.grantRequest('v-2', true);
       });
       const fp = getRCAudit().map((e) => `${e.action}:${e.actorId ?? '_'}:${e.targetId ?? '_'}:${e.mode ?? '_'}`);
