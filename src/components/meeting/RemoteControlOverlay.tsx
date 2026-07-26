@@ -44,39 +44,49 @@ export function RemoteControlOverlay({ rc }: RemoteControlOverlayProps) {
   const isControlling = status.state === 'controlling';
 
   // Convert client coordinates into normalized (0..1) coords relative to the overlay.
+  // Returns null if the cursor is outside the shared-screen area.
   const toNorm = useCallback((clientX: number, clientY: number) => {
     const el = containerRef.current;
-    if (!el) return { x: 0, y: 0 };
+    if (!el) return null;
     const rect = el.getBoundingClientRect();
-    const x = Math.max(0, Math.min(1, (clientX - rect.left) / Math.max(rect.width, 1)));
-    const y = Math.max(0, Math.min(1, (clientY - rect.top) / Math.max(rect.height, 1)));
+    if (
+      clientX < rect.left ||
+      clientX > rect.right ||
+      clientY < rect.top ||
+      clientY > rect.bottom
+    ) {
+      return null;
+    }
+    const x = (clientX - rect.left) / Math.max(rect.width, 1);
+    const y = (clientY - rect.top) / Math.max(rect.height, 1);
     return { x, y };
   }, []);
 
-  // --- Live cursor broadcast (throttled ~30Hz) ---
+  // --- Live cursor broadcast (throttled ~30Hz) via document listeners so
+  // the overlay never blocks presenter controls like "Stop Sharing". ---
   useEffect(() => {
-    const el = containerRef.current;
-    if (!el) return;
-
     const onMove = (e: PointerEvent) => {
-      const { x, y } = toNorm(e.clientX, e.clientY);
+      const norm = toNorm(e.clientX, e.clientY);
       const now = performance.now();
+      if (!norm) {
+        // Cursor outside the shared area — hide our cursor for peers.
+        const last = lastSentRef.current;
+        if (last.x >= 0 && now - last.t > 100) {
+          lastSentRef.current = { t: now, x: -1, y: -1 };
+          sendCursor(Math.max(0, last.x), Math.max(0, last.y), false);
+        }
+        return;
+      }
       const last = lastSentRef.current;
-      if (now - last.t < 33 && Math.abs(x - last.x) < 0.003 && Math.abs(y - last.y) < 0.003) return;
-      lastSentRef.current = { t: now, x, y };
-      sendCursor(x, y, true);
-      if (isControlling) sendInput({ type: 'mousemove', x, y });
-    };
-    const onLeave = () => {
-      const last = lastSentRef.current;
-      sendCursor(last.x < 0 ? 0 : last.x, last.y < 0 ? 0 : last.y, false);
+      if (now - last.t < 33 && Math.abs(norm.x - last.x) < 0.003 && Math.abs(norm.y - last.y) < 0.003) return;
+      lastSentRef.current = { t: now, x: norm.x, y: norm.y };
+      sendCursor(norm.x, norm.y, true);
+      if (isControlling) sendInput({ type: 'mousemove', x: norm.x, y: norm.y });
     };
 
-    el.addEventListener('pointermove', onMove);
-    el.addEventListener('pointerleave', onLeave);
+    document.addEventListener('pointermove', onMove, { passive: true });
     return () => {
-      el.removeEventListener('pointermove', onMove);
-      el.removeEventListener('pointerleave', onLeave);
+      document.removeEventListener('pointermove', onMove);
     };
   }, [isControlling, sendCursor, sendInput, toNorm]);
 
@@ -87,42 +97,41 @@ export function RemoteControlOverlay({ rc }: RemoteControlOverlayProps) {
     return 'left';
   }, []);
 
-  const onPointerDown = useCallback(
-    (e: React.PointerEvent) => {
-      const { x, y } = toNorm(e.clientX, e.clientY);
+  // Send a ripple whenever the user clicks inside the shared area (even the
+  // presenter clicking their own Stop Sharing button will produce a ripple —
+  // that's fine, it just visualizes clicks for everyone in the meeting).
+  useEffect(() => {
+    const onDown = (e: PointerEvent) => {
+      const norm = toNorm(e.clientX, e.clientY);
+      if (!norm) return;
       const btn = buttonMap(e.button);
-      sendRipple(x, y, btn);
-      if (isControlling) {
-        sendInput({ type: 'mousedown', x, y, button: btn });
-      }
-    },
-    [buttonMap, isControlling, sendInput, sendRipple, toNorm],
-  );
-
-  const onPointerUp = useCallback(
-    (e: React.PointerEvent) => {
+      sendRipple(norm.x, norm.y, btn);
+      if (isControlling) sendInput({ type: 'mousedown', x: norm.x, y: norm.y, button: btn });
+    };
+    const onUp = (e: PointerEvent) => {
       if (!isControlling) return;
-      const { x, y } = toNorm(e.clientX, e.clientY);
+      const norm = toNorm(e.clientX, e.clientY);
+      if (!norm) return;
       const btn = buttonMap(e.button);
-      sendInput({ type: 'mouseup', x, y, button: btn });
-      sendInput({ type: 'click', x, y, button: btn, detail: e.detail || 1 });
-    },
-    [buttonMap, isControlling, sendInput, toNorm],
-  );
-
-  const onWheel = useCallback(
-    (e: React.WheelEvent) => {
+      sendInput({ type: 'mouseup', x: norm.x, y: norm.y, button: btn });
+      sendInput({ type: 'click', x: norm.x, y: norm.y, button: btn, detail: (e as PointerEvent).detail || 1 });
+    };
+    const onWheel = (e: WheelEvent) => {
       if (!isControlling) return;
-      const { x, y } = toNorm(e.clientX, e.clientY);
-      sendInput({ type: 'wheel', x, y, deltaX: e.deltaX, deltaY: e.deltaY });
-    },
-    [isControlling, sendInput, toNorm],
-  );
+      const norm = toNorm(e.clientX, e.clientY);
+      if (!norm) return;
+      sendInput({ type: 'wheel', x: norm.x, y: norm.y, deltaX: e.deltaX, deltaY: e.deltaY });
+    };
 
-  const onContext = useCallback((e: React.MouseEvent) => {
-    // Prevent native context menu when interacting with overlay.
-    e.preventDefault();
-  }, []);
+    document.addEventListener('pointerdown', onDown, { passive: true });
+    document.addEventListener('pointerup', onUp, { passive: true });
+    document.addEventListener('wheel', onWheel, { passive: true });
+    return () => {
+      document.removeEventListener('pointerdown', onDown);
+      document.removeEventListener('pointerup', onUp);
+      document.removeEventListener('wheel', onWheel);
+    };
+  }, [buttonMap, isControlling, sendInput, sendRipple, toNorm]);
 
   // --- Keyboard capture while controlling ---
   useEffect(() => {
@@ -171,16 +180,12 @@ export function RemoteControlOverlay({ rc }: RemoteControlOverlayProps) {
   return (
     <div
       ref={containerRef}
-      onPointerDown={onPointerDown}
-      onPointerUp={onPointerUp}
-      onWheel={onWheel}
-      onContextMenu={onContext}
       className={cn(
-        'absolute inset-0 z-30',
-        // Always pointer-events-auto so we can capture cursor moves for the shared pointer.
-        'pointer-events-auto',
-        // When controlling, use a crosshair to signal active control.
-        isControlling ? 'cursor-crosshair' : 'cursor-none',
+        'absolute inset-0 z-10',
+        // The overlay itself never blocks clicks — inner controls opt in with
+        // pointer-events-auto. Document-level listeners handle cursor and
+        // click capture so the presenter's Stop-Sharing / Annotate bar keeps working.
+        'pointer-events-none',
       )}
       data-testid="remote-control-overlay"
       aria-label="Remote control overlay"
