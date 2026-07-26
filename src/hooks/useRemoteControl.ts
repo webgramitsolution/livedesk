@@ -78,12 +78,8 @@ interface UseRemoteControlOptions {
   tuning?: RCTuning;
 }
 
-export function useRemoteControl({
-  meetingId,
-  isInMeeting,
-  isLocalPresenter,
-  onExecuteInput,
-}: UseRemoteControlOptions) {
+export function useRemoteControl(options: UseRemoteControlOptions) {
+  const { meetingId, isInMeeting, isLocalPresenter, onExecuteInput } = options;
   const sessionId = useMeetingStore((s) => s.meetingSessionId);
   const userName = useMeetingStore((s) => s.userName) || 'You';
 
@@ -109,7 +105,7 @@ export function useRemoteControl({
   });
 
   // Tuning: caller may pass an override; otherwise pull the persisted per-meeting values.
-  const tuning: RCTuning = options?.tuning ?? loadRCTuning(meetingId) ?? DEFAULT_RC_TUNING;
+  const tuning: RCTuning = options.tuning ?? loadRCTuning(meetingId) ?? DEFAULT_RC_TUNING;
   const tuningRef = useRef<RCTuning>(tuning);
   useEffect(() => {
     tuningRef.current = tuning;
