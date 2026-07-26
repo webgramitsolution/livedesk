@@ -1,13 +1,15 @@
-import { useCallback, useEffect, useMemo, useRef } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { MousePointer2, Hand, MonitorCog, KeyRound, X, Lock, Download } from 'lucide-react';
+import { MousePointer2, Hand, MonitorCog, KeyRound, X, Lock, Download, Sliders, Activity } from 'lucide-react';
 import type { UseRemoteControlReturn } from '@/hooks/useRemoteControl';
 import type { RCInputEvent } from '@/lib/remoteControl/protocol';
 import { downloadRCAudit } from '@/lib/remoteControl/auditLog';
+import { RemoteControlSettingsPanel } from './RemoteControlSettingsPanel';
 import { cn } from '@/lib/utils';
 
 interface RemoteControlOverlayProps {
   rc: UseRemoteControlReturn;
+  meetingId: string;
 }
 
 /**
@@ -19,9 +21,11 @@ interface RemoteControlOverlayProps {
  * 3. Input capture layer that only activates when the local viewer has been
  *    granted control. Pointer + keyboard events are streamed to the presenter.
  */
-export function RemoteControlOverlay({ rc }: RemoteControlOverlayProps) {
+export function RemoteControlOverlay({ rc, meetingId }: RemoteControlOverlayProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const lastSentRef = useRef<{ t: number; x: number; y: number }>({ t: 0, x: -1, y: -1 });
+  const [showSettings, setShowSettings] = useState(false);
+  const [showMetrics, setShowMetrics] = useState(false);
 
   const {
     remotePresenterId,
@@ -33,6 +37,8 @@ export function RemoteControlOverlay({ rc }: RemoteControlOverlayProps) {
     requestQueue,
     activeController,
     controlLock,
+    metrics,
+    tuning,
     requestControl,
     cancelRequest,
     releaseControl,
@@ -80,7 +86,8 @@ export function RemoteControlOverlay({ rc }: RemoteControlOverlayProps) {
         return;
       }
       const last = lastSentRef.current;
-      if (now - last.t < 33 && Math.abs(norm.x - last.x) < 0.003 && Math.abs(norm.y - last.y) < 0.003) return;
+      const minMs = tuning?.cursorSendMinMs ?? 33;
+      if (now - last.t < minMs && Math.abs(norm.x - last.x) < 0.003 && Math.abs(norm.y - last.y) < 0.003) return;
       lastSentRef.current = { t: now, x: norm.x, y: norm.y };
       sendCursor(norm.x, norm.y, true);
       if (isControlling) sendInput({ type: 'mousemove', x: norm.x, y: norm.y });
@@ -90,7 +97,7 @@ export function RemoteControlOverlay({ rc }: RemoteControlOverlayProps) {
     return () => {
       document.removeEventListener('pointermove', onMove);
     };
-  }, [isControlling, sendCursor, sendInput, toNorm]);
+  }, [isControlling, sendCursor, sendInput, toNorm, tuning?.cursorSendMinMs]);
 
   // --- Click / mouse buttons ---
   const buttonMap = useCallback((b: number): 'left' | 'right' | 'middle' => {
@@ -196,13 +203,14 @@ export function RemoteControlOverlay({ rc }: RemoteControlOverlayProps) {
       {cursorList.map((c) => (
         <div
           key={c.id}
-          // Smooth cursor motion — a slightly longer CSS transition acts as a
-          // low-pass filter that hides jitter during brief network spikes.
-          className="absolute pointer-events-none transition-all duration-150 ease-out will-change-transform"
+          // Smooth cursor motion — CSS transition duration is per-meeting
+          // tunable so hosts can dial jitter smoothing per network condition.
+          className="absolute pointer-events-none will-change-transform"
           style={{
             left: `${c.x * 100}%`,
             top: `${c.y * 100}%`,
             transform: 'translate(-4px, -4px)',
+            transition: `left ${tuning?.cursorSmoothingMs ?? 150}ms ease-out, top ${tuning?.cursorSmoothingMs ?? 150}ms ease-out`,
           }}
         >
           <MousePointer2
@@ -261,13 +269,62 @@ export function RemoteControlOverlay({ rc }: RemoteControlOverlayProps) {
 
       {/* Top-right status/request panel */}
       <div className="absolute top-3 right-3 pointer-events-auto flex flex-col items-end gap-2">
-        <button
-          onClick={() => downloadRCAudit('rc-session')}
-          title="Download remote-control audit log"
-          className="inline-flex items-center gap-1 rounded-full border border-border bg-background/80 px-2.5 py-1 text-[10px] font-medium text-muted-foreground shadow hover:bg-muted backdrop-blur"
-        >
-          <Download className="h-3 w-3" /> Audit log
-        </button>
+        <div className="flex items-center gap-1">
+          <button
+            onClick={() => setShowMetrics((v) => !v)}
+            title="Toggle live control metrics"
+            className="inline-flex items-center gap-1 rounded-full border border-border bg-background/80 px-2.5 py-1 text-[10px] font-medium text-muted-foreground shadow hover:bg-muted backdrop-blur"
+          >
+            <Activity className="h-3 w-3" /> Metrics
+          </button>
+          <button
+            onClick={() => setShowSettings(true)}
+            title="Tune input rate limiting & cursor smoothing"
+            className="inline-flex items-center gap-1 rounded-full border border-border bg-background/80 px-2.5 py-1 text-[10px] font-medium text-muted-foreground shadow hover:bg-muted backdrop-blur"
+          >
+            <Sliders className="h-3 w-3" /> Tune
+          </button>
+          <button
+            onClick={() => downloadRCAudit('rc-session')}
+            title="Download remote-control audit log"
+            className="inline-flex items-center gap-1 rounded-full border border-border bg-background/80 px-2.5 py-1 text-[10px] font-medium text-muted-foreground shadow hover:bg-muted backdrop-blur"
+          >
+            <Download className="h-3 w-3" /> Audit
+          </button>
+        </div>
+
+        {showMetrics && metrics && (
+          <div
+            data-testid="rc-metrics"
+            className="rounded-xl border border-border bg-background/95 px-3 py-2 text-[10px] shadow-lg backdrop-blur w-56"
+          >
+            <div className="mb-1 flex items-center justify-between">
+              <span className="font-semibold">Control session</span>
+              <button onClick={() => setShowMetrics(false)} className="opacity-60 hover:opacity-100" aria-label="Hide metrics">
+                <X className="h-3 w-3" />
+              </button>
+            </div>
+            <dl className="grid grid-cols-2 gap-x-2 gap-y-0.5 tabular-nums">
+              <dt className="text-muted-foreground">Requests</dt>
+              <dd className="text-right">{metrics.requestsSent}</dd>
+              <dt className="text-muted-foreground">Grants</dt>
+              <dd className="text-right">{metrics.grantsReceived}</dd>
+              <dt className="text-muted-foreground">Denied</dt>
+              <dd className="text-right">{metrics.deniesReceived}</dd>
+              <dt className="text-muted-foreground">Last latency</dt>
+              <dd className="text-right">{metrics.lastGrantLatencyMs != null ? `${metrics.lastGrantLatencyMs} ms` : '—'}</dd>
+              <dt className="text-muted-foreground">Avg latency</dt>
+              <dd className="text-right">{metrics.avgGrantLatencyMs != null ? `${metrics.avgGrantLatencyMs} ms` : '—'}</dd>
+              <dt className="text-muted-foreground">Throttled out</dt>
+              <dd className="text-right">{metrics.throttledOutbound}</dd>
+              <dt className="text-muted-foreground">Dropped (invalid)</dt>
+              <dd className="text-right">{metrics.droppedInboundInvalid}</dd>
+              <dt className="text-muted-foreground">Dropped (unauth)</dt>
+              <dd className="text-right">{metrics.droppedInboundUnauthorized}</dd>
+            </dl>
+          </div>
+        )}
+
         {isLocalPresenter && activeController && (
           <div className="flex items-center gap-2 rounded-full border border-primary/40 bg-background/95 px-3 py-1.5 text-xs shadow-lg backdrop-blur">
             <span className="inline-flex h-2 w-2 rounded-full bg-primary animate-pulse" />
@@ -356,6 +413,10 @@ export function RemoteControlOverlay({ rc }: RemoteControlOverlayProps) {
             </ul>
           </div>
         </div>
+      )}
+
+      {showSettings && (
+        <RemoteControlSettingsPanel meetingId={meetingId} onClose={() => setShowSettings(false)} />
       )}
     </div>
   );
