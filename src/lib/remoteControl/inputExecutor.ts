@@ -80,7 +80,9 @@ export function executeBrowserInput(event: RCInputEvent) {
 }
 
 // Electron-only bridge stub; picked up automatically if the desktop build
-// exposes window.electronAPI.remoteControl.
+// exposes window.electronAPI.remoteControl. In the desktop app the preload
+// script (electron/preload.cjs) wires this to the nut-js handler running in
+// the main process, giving full OS-level mouse + keyboard control.
 interface ElectronRemoteControlBridge {
   handleInput: (event: RCInputEvent) => void;
 }
