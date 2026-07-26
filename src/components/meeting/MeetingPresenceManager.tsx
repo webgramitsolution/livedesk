@@ -5,6 +5,7 @@ import { toast } from 'sonner';
 import { logWebRTCEvent } from '@/lib/webrtcLogger';
 
 type PresenceRow = {
+  id?: string;
   display_name: string;
   is_camera_on: boolean;
   is_mic_on: boolean;
@@ -137,21 +138,42 @@ export function MeetingPresenceManager() {
 
       const db = supabase as typeof supabase & {
         from: (table: string) => {
-          delete: () => { eq: (column: string, value: string) => Promise<unknown> };
+          select: (columns: string) => {
+            eq: (column: string, value: string) => {
+              eq: (column: string, value: string) => Promise<{ data: Array<{ id: string }> | null }>;
+            };
+          };
+          update: (values: Record<string, unknown>) => {
+            eq: (column: string, value: string) => {
+              eq: (column: string, value: string) => Promise<{ error: { message: string } | null }>;
+            };
+          };
           insert: (values: Record<string, unknown>) => Promise<{ error: { message: string } | null }>;
         };
       };
 
-      await db.from(TABLE).delete().eq('session_id', localSessionId);
-
-      const { error } = await db.from(TABLE).insert({
+      const presenceValues = {
         meeting_code: meetingId,
         user_id: session.user.id,
         session_id: localSessionId,
         display_name: displayName,
         is_mic_on: currentMicState,
         is_camera_on: currentCameraState,
-      });
+      };
+
+      const { data: existingRows } = await db
+        .from(TABLE)
+        .select('id')
+        .eq('meeting_code', meetingId)
+        .eq('session_id', localSessionId);
+
+      const { error } = existingRows?.length
+        ? await db
+            .from(TABLE)
+            .update(presenceValues)
+            .eq('meeting_code', meetingId)
+            .eq('session_id', localSessionId)
+        : await db.from(TABLE).insert(presenceValues);
 
       if (error) {
         toast.error(error.message);
