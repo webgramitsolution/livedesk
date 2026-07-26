@@ -105,6 +105,21 @@ export function useRemoteControl(options: UseRemoteControlOptions) {
     droppedInboundUnauthorized: 0,
   });
 
+  // True for a short window after (re)mount if we recovered non-trivial state
+  // from sessionStorage. The overlay renders a "Session restored" pill so
+  // the user knows queue/lock/pending-request state survived a brief
+  // disconnect and wasn't silently reset.
+  const [sessionRestored, setSessionRestored] = useState<
+    | null
+    | {
+        at: number;
+        queueSize: number;
+        hadLock: boolean;
+        wasControlling: boolean;
+        wasRequesting: boolean;
+      }
+  >(null);
+
   // Tuning: caller may pass an override; otherwise pull the persisted per-meeting values.
   const tuning: RCTuning = options.tuning ?? loadRCTuning(meetingId) ?? DEFAULT_RC_TUNING;
   const tuningRef = useRef<RCTuning>(tuning);
@@ -438,6 +453,20 @@ export function useRemoteControl(options: UseRemoteControlOptions) {
       setActiveController(persisted.activeController ?? null);
       setControlLock(persisted.controlLock ?? null);
       setStatus(persisted.status ?? { state: 'idle' });
+      const nonTrivial =
+        (persisted.requestQueue?.length ?? 0) > 0 ||
+        !!persisted.activeController ||
+        !!persisted.controlLock ||
+        (persisted.status?.state && persisted.status.state !== 'idle');
+      if (nonTrivial) {
+        setSessionRestored({
+          at: Date.now(),
+          queueSize: persisted.requestQueue?.length ?? 0,
+          hadLock: !!persisted.controlLock,
+          wasControlling: persisted.status?.state === 'controlling',
+          wasRequesting: persisted.status?.state === 'requesting',
+        });
+      }
     }
     const channel = supabase.channel(`webrtc-${meetingId}`, {
       config: { broadcast: { self: false } },
@@ -619,9 +648,22 @@ export function useRemoteControl(options: UseRemoteControlOptions) {
       requestQueue.forEach((r) => {
         if (r.from !== target.from) {
           send({ kind: 'deny', from: sessionId, to: r.from, reason: 'Another viewer was granted control' });
+          // Audit-log each implicit denial so the queue-drain has an exact,
+          // countable record (needed for the deterministic stress test's
+          // grants==1 / denies==N invariants).
+          logRCAudit({
+            action: 'deny',
+            actorId: sessionId,
+            actorName: userNameRef.current,
+            targetId: r.from,
+            targetName: r.name,
+            reason: 'Another viewer was granted control',
+            meetingId,
+          });
         }
       });
       setRequestQueue([]);
+      requestQueueRef.current = [];
       broadcastLock({ id: controller.id, name: controller.name, allowKeyboard });
       logRCAudit({
         action: 'grant',
@@ -732,6 +774,7 @@ export function useRemoteControl(options: UseRemoteControlOptions) {
     denyRequest,
     reclaimControl,
     sendInput,
+    sessionRestored,
     /** Exposed for automated tests to inject validated messages. */
     __handleMessage: handleMessage,
   };
