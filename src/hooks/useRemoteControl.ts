@@ -298,11 +298,15 @@ export function useRemoteControl(options: UseRemoteControlOptions) {
           // (React batches the queue setter, so a functional dedup inside
           // the updater can't drive side-effects out here reliably).
           if (requestQueueRef.current.some((r) => r.from === msg.from)) {
+            // eslint-disable-next-line no-console
+            console.error('[DBG] dedup-skip', msg.from, 'ref=', requestQueueRef.current.map(r=>r.from));
             break;
           }
           const newEntry: IncomingRequest = { from: msg.from, name: msg.name, requestedAt: Date.now() };
           requestQueueRef.current = [...requestQueueRef.current, newEntry];
           setRequestQueue(requestQueueRef.current);
+          // eslint-disable-next-line no-console
+          console.error('[DBG] added', msg.from, 'ref=', requestQueueRef.current.map(r=>r.from));
           logRCAudit({
             action: 'queue-added',
             actorId: msg.from,
