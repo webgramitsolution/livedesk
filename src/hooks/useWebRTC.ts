@@ -582,8 +582,10 @@ export function useWebRTC(meetingId: string, isInMeeting: boolean) {
 
     peersRef.current.forEach((peer) => {
       const senders = peer.pc.getSenders();
+      const transceivers = peer.pc.getTransceivers();
       const nextAudioTrack = nextStream.getAudioTracks()[0] ?? null;
       const nextVideoTrack = nextStream.getVideoTracks()[0] ?? null;
+      let needsRenegotiation = false;
 
       senders.forEach((sender) => {
         if (sender.track?.kind === 'audio') {
@@ -595,18 +597,40 @@ export function useWebRTC(meetingId: string, isInMeeting: boolean) {
       });
 
       if (nextAudioTrack && !senders.some((sender) => sender.track?.kind === 'audio')) {
-        peer.pc.addTrack(nextAudioTrack, nextStream);
+        const recvOnlyAudio = transceivers.find((transceiver) =>
+          transceiver.receiver.track.kind === 'audio' && !transceiver.sender.track
+        );
+        if (recvOnlyAudio) {
+          recvOnlyAudio.direction = 'sendrecv';
+          void recvOnlyAudio.sender.replaceTrack(nextAudioTrack);
+        } else {
+          peer.pc.addTrack(nextAudioTrack, nextStream);
+        }
+        needsRenegotiation = true;
       }
 
       if (nextVideoTrack && !senders.some((sender) => sender.track?.kind === 'video')) {
-        peer.pc.addTrack(nextVideoTrack, nextStream);
+        const recvOnlyVideo = transceivers.find((transceiver) =>
+          transceiver.receiver.track.kind === 'video' && !transceiver.sender.track
+        );
+        if (recvOnlyVideo) {
+          recvOnlyVideo.direction = 'sendrecv';
+          void recvOnlyVideo.sender.replaceTrack(nextVideoTrack);
+        } else {
+          peer.pc.addTrack(nextVideoTrack, nextStream);
+        }
+        needsRenegotiation = true;
+      }
+
+      if (needsRenegotiation) {
+        void sendOfferToPeer(peer.peerId);
       }
     });
 
     if (previousStream && previousStream !== nextStream && previousStream !== rawLocalStreamRef.current) {
       previousStream.getTracks().forEach((track) => track.stop());
     }
-  }, []);
+  }, [sendOfferToPeer]);
 
   useEffect(() => {
     const rawStream = rawLocalStreamRef.current;
