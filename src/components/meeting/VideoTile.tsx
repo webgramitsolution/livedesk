@@ -187,7 +187,7 @@ export function VideoTile({ participant, subtitle, compact, mediaStream }: Video
       } ${participant.isSpeaking ? 'ring-2 ring-success' : ''}`}
     >
       {mediaStream && participant.id !== '1' ? (
-        <audio ref={audioRef} autoPlay playsInline preload="auto" />
+        <audio ref={audioRef} autoPlay playsInline preload="auto" data-remote-audio="true" />
       ) : null}
 
       {audioDiagnostic && !compact && (
