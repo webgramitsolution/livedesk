@@ -94,37 +94,56 @@ export function ConnectingScreen() {
       micLabel: 'Requesting access…', cameraLabel: 'Requesting access…',
     }));
 
-    const attach = (stream: MediaStream, cameraOk: boolean) => {
-      // Keep the granted stream alive and hand it to the meeting so the
-      // browser is never asked for the same devices twice.
-      setPreflightStream(stream);
-      const audioTrack = stream.getAudioTracks()[0];
-      const videoTrack = stream.getVideoTracks()[0];
-      setDiagnostics((prev) => ({
-        ...prev,
-        mic: audioTrack ? 'granted' : 'denied',
-        micLabel: audioTrack?.label || 'Mic access blocked',
-        camera: cameraOk && videoTrack ? 'granted' : 'denied',
-        cameraLabel: cameraOk ? (videoTrack?.label || 'Camera') : 'Camera access blocked',
-      }));
+    // Ask for both first (single browser prompt). If that fails for any reason
+    // — camera busy, no camera, partial deny — fall back to asking each device
+    // separately and merge whatever we get, so one bad device never blocks the
+    // other one (that was the cause of the stuck "Retry" state).
+    const statusFor = (err: unknown): DeviceStatus => {
+      const name = (err as { name?: string })?.name;
+      if (name === 'NotFoundError' || name === 'OverconstrainedError' || name === 'DevicesNotFoundError') return 'unavailable';
+      if (name === 'NotReadableError' || name === 'AbortError' || name === 'TrackStartError') return 'unavailable';
+      return 'denied';
+    };
+
+    const merged = new MediaStream();
+    let micStatus: DeviceStatus = 'denied';
+    let camStatus: DeviceStatus = 'denied';
+    let micLabel = 'Mic access blocked';
+    let camLabel = 'Camera access blocked';
+
+    const absorb = (stream: MediaStream) => {
+      stream.getTracks().forEach((t) => merged.addTrack(t));
+      const a = merged.getAudioTracks()[0];
+      const v = merged.getVideoTracks()[0];
+      if (a) { micStatus = 'granted'; micLabel = a.label || 'Microphone'; }
+      if (v) { camStatus = 'granted'; camLabel = v.label || 'Camera'; }
     };
 
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: true });
-      attach(stream, true);
+      absorb(await navigator.mediaDevices.getUserMedia({ audio: true, video: true }));
     } catch {
       try {
-        const audioStream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
-        attach(audioStream, false);
-      } catch {
-        setPreflightStream(null);
-        setDiagnostics((prev) => ({
-          ...prev,
-          mic: 'denied', micLabel: 'Mic access blocked',
-          camera: 'denied', cameraLabel: 'Camera access blocked',
-        }));
+        absorb(await navigator.mediaDevices.getUserMedia({ audio: true, video: false }));
+      } catch (audioErr) {
+        micStatus = statusFor(audioErr);
+        micLabel = micStatus === 'unavailable' ? 'No microphone found' : 'Mic access blocked';
+      }
+      try {
+        absorb(await navigator.mediaDevices.getUserMedia({ audio: false, video: true }));
+      } catch (videoErr) {
+        camStatus = statusFor(videoErr);
+        camLabel = camStatus === 'unavailable' ? 'No camera found' : 'Camera access blocked';
       }
     }
+
+    // Keep granted tracks alive and hand them to the meeting so the browser is
+    // never asked for the same devices twice.
+    setPreflightStream(merged.getTracks().length ? merged : null);
+    setDiagnostics((prev) => ({
+      ...prev,
+      mic: micStatus, micLabel,
+      camera: camStatus, cameraLabel: camLabel,
+    }));
     setAllChecked(true);
   }, []);
 
@@ -133,17 +152,20 @@ export function ConnectingScreen() {
     if (consentAsked && diagnostics.mic === 'idle') void requestAccess();
   }, [consentAsked, diagnostics.mic, requestAccess]);
 
-  // Join automatically once devices are ready.
+  // Join automatically once at least one device is ready.
   useEffect(() => {
     if (!allChecked) return;
-    const hasAudio = diagnostics.mic === 'granted';
-    if (!hasAudio) return;
-    toast.success('Devices ready — joining meeting');
+    const hasAny = diagnostics.mic === 'granted' || diagnostics.camera === 'granted';
+    if (!hasAny) return;
+    toast.success(
+      diagnostics.mic === 'granted' ? 'Devices ready — joining meeting' : 'Joining with camera only'
+    );
     const timer = setTimeout(() => setScreen('meeting'), 900);
     return () => clearTimeout(timer);
-  }, [allChecked, diagnostics.mic, setScreen]);
+  }, [allChecked, diagnostics.mic, diagnostics.camera, setScreen]);
 
-  const anyBlocked = allChecked && diagnostics.mic === 'denied' && diagnostics.camera === 'denied';
+  const anyBlocked =
+    allChecked && diagnostics.mic !== 'granted' && diagnostics.camera !== 'granted';
   const waitingForConsent = !consentAsked;
 
   return (
@@ -224,6 +246,8 @@ export function ConnectingScreen() {
               ? 'Waiting for your permission…'
               : anyBlocked
               ? 'Mic & camera are blocked in your browser. Open the lock icon in the address bar, allow them, then retry.'
+              : diagnostics.mic === 'denied' || diagnostics.mic === 'unavailable'
+              ? 'Microphone unavailable — joining with camera only.'
               : diagnostics.camera === 'denied'
               ? 'Camera blocked — joining with audio only. You can enable camera later.'
               : 'All devices ready — joining your meeting…'}

@@ -54,19 +54,19 @@ export function InviteModal() {
 
   // Shared body content
   const Body = (
-    <div className="flex-1 overflow-y-auto">
-      <div className="px-5 py-5 space-y-5">
+    <div className="flex-1 min-h-0 overflow-y-auto overscroll-contain">
+      <div className="px-4 py-4 space-y-4 sm:px-5">
         {/* Direct Join Link */}
         <section>
           <label className="text-xs font-semibold uppercase tracking-wide text-muted-foreground mb-2 block">Direct Join Link</label>
           <div className="flex gap-2">
-            <div className="flex-1 min-w-0 px-4 h-12 flex items-center rounded-xl border border-input bg-secondary/50 text-sm text-foreground truncate">
+            <div className="flex-1 min-w-0 px-3 h-10 flex items-center rounded-xl border border-input bg-secondary/50 text-sm text-foreground truncate">
               {meetingLink}
             </div>
             <motion.button
               whileTap={{ scale: 0.95 }}
               onClick={() => handleCopy(meetingLink, 'link')}
-              className={`h-12 min-w-[64px] px-4 rounded-xl border transition-colors flex items-center justify-center gap-1.5 text-sm font-semibold ${
+              className={`h-10 min-w-[60px] px-3 rounded-xl border transition-colors flex items-center justify-center gap-1.5 text-sm font-semibold ${
                 copied === 'link' ? 'border-success bg-success/10 text-success' : 'border-border hover:bg-muted text-foreground'
               }`}
             >
@@ -80,13 +80,13 @@ export function InviteModal() {
         <section>
           <label className="text-xs font-semibold uppercase tracking-wide text-muted-foreground mb-2 block">Meeting ID</label>
           <div className="flex gap-2">
-            <div className="flex-1 min-w-0 px-4 h-12 flex items-center rounded-xl border border-input bg-secondary/50 font-mono text-sm text-foreground">
+            <div className="flex-1 min-w-0 px-3 h-10 flex items-center rounded-xl border border-input bg-secondary/50 font-mono text-sm text-foreground">
               {meetingId}
             </div>
             <motion.button
               whileTap={{ scale: 0.95 }}
               onClick={() => handleCopy(meetingId, 'id')}
-              className={`h-12 min-w-[64px] px-4 rounded-xl border transition-colors flex items-center justify-center gap-1.5 text-sm font-semibold ${
+              className={`h-10 min-w-[60px] px-3 rounded-xl border transition-colors flex items-center justify-center gap-1.5 text-sm font-semibold ${
                 copied === 'id' ? 'border-success bg-success/10 text-success' : 'border-border hover:bg-muted text-foreground'
               }`}
             >
@@ -101,11 +101,11 @@ export function InviteModal() {
           <label className="text-xs font-semibold uppercase tracking-wide text-muted-foreground mb-2 flex items-center gap-1.5">
             <QrCode className="w-3.5 h-3.5" /> Scan to join
           </label>
-          <div className="flex items-center justify-center rounded-2xl border border-border bg-secondary/30 p-5">
+          <div className="flex items-center justify-center rounded-2xl border border-border bg-secondary/30 p-3">
             <img
               src={qrSrc}
               alt={`QR code for ${meetingLink}`}
-              className="w-44 h-44 rounded-lg bg-white p-2"
+              className="h-[clamp(6rem,18vh,10rem)] w-[clamp(6rem,18vh,10rem)] rounded-lg bg-white p-2"
               loading="lazy"
             />
           </div>
@@ -113,17 +113,17 @@ export function InviteModal() {
 
         {/* Share via */}
         <section>
-          <label className="text-xs font-semibold uppercase tracking-wide text-muted-foreground mb-3 block">Share via</label>
-          <div className="grid grid-cols-4 gap-3 sm:grid-cols-5">
+          <label className="text-xs font-semibold uppercase tracking-wide text-muted-foreground mb-2 block">Share via</label>
+          <div className="grid grid-cols-5 gap-2">
             {shareOptions.map((opt) => (
               <motion.button
                 key={opt.label}
                 whileTap={{ scale: 0.94 }}
                 onClick={opt.onClick}
-                className="flex flex-col items-center gap-2 rounded-2xl p-2 hover:bg-muted transition-colors"
+                className="flex flex-col items-center gap-1.5 rounded-2xl p-1.5 hover:bg-muted transition-colors"
               >
-                <span className={`flex h-12 w-12 items-center justify-center rounded-2xl text-white ${opt.bg}`}>
-                  <opt.icon className="w-5 h-5" />
+                <span className={`flex h-10 w-10 items-center justify-center rounded-2xl text-white ${opt.bg}`}>
+                  <opt.icon className="w-4 h-4" />
                 </span>
                 <span className="text-[11px] font-medium text-foreground leading-tight text-center">{opt.label}</span>
               </motion.button>
@@ -203,11 +203,11 @@ export function InviteModal() {
               animate={{ x: 0 }}
               exit={{ x: '100%' }}
               transition={{ type: 'spring', damping: 28, stiffness: 280 }}
-              className="fixed inset-y-0 right-0 z-[60] w-[90vw] max-w-[440px] bg-background border-l border-border shadow-2xl flex flex-col"
+              className="fixed inset-y-0 right-0 z-[60] w-[90vw] max-w-[440px] bg-background border-l border-border shadow-2xl flex flex-col overflow-hidden"
               role="dialog"
               aria-label="Invite participants"
             >
-              <div className="flex items-center justify-between border-b border-border px-5 py-4">
+              <div className="shrink-0 flex items-center justify-between border-b border-border px-5 py-3">
                 <div className="flex items-center gap-2">
                   <LinkIcon className="w-5 h-5 text-primary" />
                   <h2 className="font-display font-bold text-foreground text-lg">Invite Participants</h2>
@@ -230,11 +230,11 @@ export function InviteModal() {
               animate={{ opacity: 1, scale: 1, y: 0 }}
               exit={{ opacity: 0, scale: 0.95, y: 20 }}
               transition={{ type: 'spring', damping: 25, stiffness: 300 }}
-              className="fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[90vw] max-w-md max-h-[85vh] bg-background rounded-2xl border border-border control-bar-elevated z-[60] flex flex-col overflow-hidden"
+              className="fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[min(92vw,28rem)] max-h-[min(92dvh,42rem)] bg-background rounded-2xl border border-border control-bar-elevated z-[60] flex flex-col overflow-hidden"
               role="dialog"
               aria-label="Invite participants"
             >
-              <div className="flex items-center justify-between border-b border-border px-5 py-4">
+              <div className="shrink-0 flex items-center justify-between border-b border-border px-5 py-3">
                 <div className="flex items-center gap-2">
                   <LinkIcon className="w-5 h-5 text-primary" />
                   <h2 className="font-display font-bold text-foreground text-lg">Invite Participants</h2>
