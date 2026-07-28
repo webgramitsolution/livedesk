@@ -4,7 +4,7 @@ import { useMeetingStore } from '@/store/meetingStore';
 import { createNoiseCancelledStream } from '@/lib/audio/noiseCancellation';
 import { toast } from 'sonner';
 import { logWebRTCEvent } from '@/lib/webrtcLogger';
-import { takePreflightStream } from '@/lib/mediaPreflight';
+import { requestMeetingMedia, takePreflightStream } from '@/lib/mediaPreflight';
 
 const ICE_SERVERS: RTCConfiguration = {
   iceServers: [
@@ -227,13 +227,21 @@ export function useWebRTC(meetingId: string, isInMeeting: boolean) {
 
       const pc = new RTCPeerConnection(ICE_SERVERS);
 
-      // Add local camera/mic tracks
-      if (localStreamRef.current) {
-        localStreamRef.current.getTracks().forEach((track) => {
-          const localStream = localStreamRef.current;
-          if (localStream) pc.addTrack(track, localStream);
-        });
-      }
+      const localStream = localStreamRef.current;
+      const localAudioTracks = localStream?.getAudioTracks() ?? [];
+      const localVideoTracks = localStream?.getVideoTracks() ?? [];
+
+      // Add local camera/mic tracks when available. If the phone joins before
+      // media is ready (or joins anyway), add receive-only transceivers so the
+      // peer connection still negotiates incoming host/member audio and video.
+      localAudioTracks.forEach((track) => {
+        if (localStream) pc.addTrack(track, localStream);
+      });
+      localVideoTracks.forEach((track) => {
+        if (localStream) pc.addTrack(track, localStream);
+      });
+      if (localAudioTracks.length === 0) pc.addTransceiver('audio', { direction: 'recvonly' });
+      if (localVideoTracks.length === 0) pc.addTransceiver('video', { direction: 'recvonly' });
 
       // Add screen share tracks if active
       if (screenStreamRef.current) {
@@ -643,10 +651,12 @@ export function useWebRTC(meetingId: string, isInMeeting: boolean) {
         return;
       }
       try {
-        const stream = await navigator.mediaDevices.getUserMedia({
-          audio: true,
-          video: true,
-        });
+        const result = await requestMeetingMedia();
+        const stream = result.stream;
+        if (!stream) {
+          console.warn('No media devices granted for this meeting');
+          return;
+        }
         if (cancelled) {
           stream.getTracks().forEach((t) => t.stop());
           return;
@@ -654,21 +664,7 @@ export function useWebRTC(meetingId: string, isInMeeting: boolean) {
         rawLocalStreamRef.current = stream;
         applyProcessedLocalStream(stream);
       } catch (err) {
-        console.warn('getUserMedia failed, trying audio only:', err);
-        try {
-          const stream = await navigator.mediaDevices.getUserMedia({
-            audio: true,
-            video: false,
-          });
-          if (cancelled) {
-            stream.getTracks().forEach((t) => t.stop());
-            return;
-          }
-          rawLocalStreamRef.current = stream;
-          applyProcessedLocalStream(stream);
-        } catch (err2) {
-          console.error('No media devices available:', err2);
-        }
+        console.error('No media devices available:', err);
       }
     }
 
@@ -715,7 +711,7 @@ export function useWebRTC(meetingId: string, isInMeeting: boolean) {
 
   // Setup signaling channel
   useEffect(() => {
-    if (!isInMeeting || !meetingId || !meetingSessionId || !localStream) return;
+    if (!isInMeeting || !meetingId || !meetingSessionId) return;
 
     let cancelled = false;
     let joinTimers: ReturnType<typeof setTimeout>[] = [];
@@ -803,7 +799,7 @@ export function useWebRTC(meetingId: string, isInMeeting: boolean) {
       if (channel) supabase.removeChannel(channel);
       channelRef.current = null;
     };
-  }, [ensurePresenceReady, handleAnswer, handleIceCandidate, handleOffer, isInMeeting, localStream, meetingId, meetingSessionId, sendOfferToPeer, updateRemoteStreams]);
+  }, [ensurePresenceReady, handleAnswer, handleIceCandidate, handleOffer, isInMeeting, meetingId, meetingSessionId, sendOfferToPeer, updateRemoteStreams]);
 
   return {
     localStream,
