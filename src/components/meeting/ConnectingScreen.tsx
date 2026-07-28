@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { motion } from 'framer-motion';
 import { AlertCircle, Camera, CameraOff, Check, Loader2, Mic, MicOff, Shield, Volume2 } from 'lucide-react';
 import { useMeetingStore } from '@/store/meetingStore';
-import { setPreflightStream, queryMediaPermissions } from '@/lib/mediaPreflight';
+import { setPreflightStream, queryMediaPermissions, requestMeetingMedia } from '@/lib/mediaPreflight';
 import { toast } from 'sonner';
 
 type DeviceStatus = 'idle' | 'checking' | 'granted' | 'denied' | 'unavailable';
@@ -49,7 +49,7 @@ function DeviceRow({ icon: Icon, label, deviceName, status }: { icon: React.Elem
 }
 
 export function ConnectingScreen() {
-  const { setScreen, meetingId } = useMeetingStore();
+  const { setScreen, meetingId, isMicOn, isCameraOn, toggleMic, toggleCamera } = useMeetingStore();
   const [diagnostics, setDiagnostics] = useState<DeviceDiagnostics>(IDLE_DIAGNOSTICS);
   const [consentAsked, setConsentAsked] = useState(false);
   const [allChecked, setAllChecked] = useState(false);
@@ -94,58 +94,25 @@ export function ConnectingScreen() {
       micLabel: 'Requesting access…', cameraLabel: 'Requesting access…',
     }));
 
-    // Ask for both first (single browser prompt). If that fails for any reason
-    // — camera busy, no camera, partial deny — fall back to asking each device
-    // separately and merge whatever we get, so one bad device never blocks the
-    // other one (that was the cause of the stuck "Retry" state).
-    const statusFor = (err: unknown): DeviceStatus => {
-      const name = (err as { name?: string })?.name;
-      if (name === 'NotFoundError' || name === 'OverconstrainedError' || name === 'DevicesNotFoundError') return 'unavailable';
-      if (name === 'NotReadableError' || name === 'AbortError' || name === 'TrackStartError') return 'unavailable';
-      return 'denied';
-    };
+    const result = await requestMeetingMedia();
+    const micStatus = result.mic;
+    const camStatus = result.camera;
+    const micLabel = result.micLabel;
+    const camLabel = result.cameraLabel;
 
-    const merged = new MediaStream();
-    let micStatus: DeviceStatus = 'denied';
-    let camStatus: DeviceStatus = 'denied';
-    let micLabel = 'Mic access blocked';
-    let camLabel = 'Camera access blocked';
-
-    const absorb = (stream: MediaStream) => {
-      stream.getTracks().forEach((t) => merged.addTrack(t));
-      const a = merged.getAudioTracks()[0];
-      const v = merged.getVideoTracks()[0];
-      if (a) { micStatus = 'granted'; micLabel = a.label || 'Microphone'; }
-      if (v) { camStatus = 'granted'; camLabel = v.label || 'Camera'; }
-    };
-
-    try {
-      absorb(await navigator.mediaDevices.getUserMedia({ audio: true, video: true }));
-    } catch {
-      try {
-        absorb(await navigator.mediaDevices.getUserMedia({ audio: true, video: false }));
-      } catch (audioErr) {
-        micStatus = statusFor(audioErr);
-        micLabel = micStatus === 'unavailable' ? 'No microphone found' : 'Mic access blocked';
-      }
-      try {
-        absorb(await navigator.mediaDevices.getUserMedia({ audio: false, video: true }));
-      } catch (videoErr) {
-        camStatus = statusFor(videoErr);
-        camLabel = camStatus === 'unavailable' ? 'No camera found' : 'Camera access blocked';
-      }
-    }
+    if (micStatus === 'granted' && !isMicOn) toggleMic();
+    if (camStatus === 'granted' && !isCameraOn) toggleCamera();
 
     // Keep granted tracks alive and hand them to the meeting so the browser is
     // never asked for the same devices twice.
-    setPreflightStream(merged.getTracks().length ? merged : null);
+    setPreflightStream(result.stream);
     setDiagnostics((prev) => ({
       ...prev,
       mic: micStatus, micLabel,
       camera: camStatus, cameraLabel: camLabel,
     }));
     setAllChecked(true);
-  }, []);
+  }, [isCameraOn, isMicOn, toggleCamera, toggleMic]);
 
   // Auto-run once consent is implied by an existing browser grant.
   useEffect(() => {
