@@ -203,11 +203,11 @@ export function InviteModal() {
               animate={{ x: 0 }}
               exit={{ x: '100%' }}
               transition={{ type: 'spring', damping: 28, stiffness: 280 }}
-              className="fixed inset-y-0 right-0 z-[60] w-[90vw] max-w-[440px] bg-background border-l border-border shadow-2xl flex flex-col"
+              className="fixed inset-y-0 right-0 z-[60] w-[90vw] max-w-[440px] bg-background border-l border-border shadow-2xl flex flex-col overflow-hidden"
               role="dialog"
               aria-label="Invite participants"
             >
-              <div className="flex items-center justify-between border-b border-border px-5 py-4">
+              <div className="shrink-0 flex items-center justify-between border-b border-border px-5 py-3">
                 <div className="flex items-center gap-2">
                   <LinkIcon className="w-5 h-5 text-primary" />
                   <h2 className="font-display font-bold text-foreground text-lg">Invite Participants</h2>
@@ -230,11 +230,11 @@ export function InviteModal() {
               animate={{ opacity: 1, scale: 1, y: 0 }}
               exit={{ opacity: 0, scale: 0.95, y: 20 }}
               transition={{ type: 'spring', damping: 25, stiffness: 300 }}
-              className="fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[90vw] max-w-md max-h-[85vh] bg-background rounded-2xl border border-border control-bar-elevated z-[60] flex flex-col overflow-hidden"
+              className="fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[min(92vw,28rem)] max-h-[min(92dvh,42rem)] bg-background rounded-2xl border border-border control-bar-elevated z-[60] flex flex-col overflow-hidden"
               role="dialog"
               aria-label="Invite participants"
             >
-              <div className="flex items-center justify-between border-b border-border px-5 py-4">
+              <div className="shrink-0 flex items-center justify-between border-b border-border px-5 py-3">
                 <div className="flex items-center gap-2">
                   <LinkIcon className="w-5 h-5 text-primary" />
                   <h2 className="font-display font-bold text-foreground text-lg">Invite Participants</h2>
