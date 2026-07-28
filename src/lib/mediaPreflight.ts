@@ -75,6 +75,37 @@ export async function requestMeetingMedia(): Promise<MeetingMediaAccessResult> {
   let cameraLabel = 'Camera access blocked';
 
   try {
+    const combined = await navigator.mediaDevices.getUserMedia({
+      audio: MEETING_AUDIO_CONSTRAINTS,
+      video: MEETING_VIDEO_CONSTRAINTS,
+    });
+    combined.getTracks().forEach((track) => {
+      track.enabled = true;
+      merged.addTrack(track);
+    });
+    const audioTrack = merged.getAudioTracks()[0];
+    const videoTrack = merged.getVideoTracks()[0];
+    if (audioTrack) {
+      mic = 'granted';
+      micLabel = audioTrack.label || 'Microphone';
+    }
+    if (videoTrack) {
+      camera = 'granted';
+      cameraLabel = videoTrack.label || 'Camera';
+    }
+    return {
+      stream: merged.getTracks().length ? merged : null,
+      mic,
+      camera,
+      micLabel,
+      cameraLabel,
+    };
+  } catch {
+    // Fall back to individual requests so a bad/missing camera doesn't block
+    // the microphone, and a missing mic doesn't block camera-only joining.
+  }
+
+  try {
     const audioStream = await navigator.mediaDevices.getUserMedia({ audio: MEETING_AUDIO_CONSTRAINTS, video: false });
     audioStream.getAudioTracks().forEach((track) => {
       track.enabled = true;
@@ -89,10 +120,6 @@ export async function requestMeetingMedia(): Promise<MeetingMediaAccessResult> {
     mic = statusForMediaError(audioErr);
     micLabel = mic === 'unavailable' ? 'No microphone found' : 'Mic access blocked';
   }
-
-  // Mobile browsers are more reliable when the camera prompt is requested after
-  // the microphone prompt has settled, instead of using one combined request.
-  await new Promise((resolve) => setTimeout(resolve, 120));
 
   try {
     const videoStream = await navigator.mediaDevices.getUserMedia({ audio: false, video: MEETING_VIDEO_CONSTRAINTS });
