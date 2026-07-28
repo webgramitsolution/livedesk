@@ -630,6 +630,17 @@ export function useWebRTC(meetingId: string, isInMeeting: boolean) {
     let cancelled = false;
 
     async function startMedia() {
+      // Reuse the stream already granted during the pre-join device check.
+      const preflight = takePreflightStream();
+      if (preflight) {
+        if (cancelled) {
+          preflight.getTracks().forEach((t) => t.stop());
+          return;
+        }
+        rawLocalStreamRef.current = preflight;
+        applyProcessedLocalStream(preflight);
+        return;
+      }
       try {
         const stream = await navigator.mediaDevices.getUserMedia({
           audio: true,
