@@ -54,6 +54,33 @@ export function MeetingRoom() {
   });
   const processedLocalStream = useVirtualBackground(localStream);
   const { startRecording, stopRecording, recordingBlob, downloadRecording, clearRecording } = useMeetingRecorder();
+  const [soundUnlockVisible, setSoundUnlockVisible] = useState(false);
+
+  useEffect(() => {
+    if (screen !== 'meeting') return;
+
+    const unlockAudio = () => {
+      document.querySelectorAll<HTMLAudioElement>('audio[data-remote-audio="true"]').forEach((audio) => {
+        audio.muted = false;
+        audio.volume = 1;
+        void audio.play().catch(() => undefined);
+      });
+      setSoundUnlockVisible(false);
+    };
+
+    const onBlocked = () => setSoundUnlockVisible(true);
+    window.addEventListener('remote-audio-blocked', onBlocked);
+    window.addEventListener('pointerdown', unlockAudio, { passive: true });
+    window.addEventListener('touchend', unlockAudio, { passive: true });
+    window.addEventListener('keydown', unlockAudio);
+
+    return () => {
+      window.removeEventListener('remote-audio-blocked', onBlocked);
+      window.removeEventListener('pointerdown', unlockAudio);
+      window.removeEventListener('touchend', unlockAudio);
+      window.removeEventListener('keydown', unlockAudio);
+    };
+  }, [screen]);
 
   useEffect(() => {
     if (import.meta.env.PROD || typeof window === 'undefined') return;
@@ -132,6 +159,23 @@ export function MeetingRoom() {
       <PerformanceHud getPeerStats={getPeerStats} getPeerDiagnostics={getPeerDiagnostics} />
       <AlignmentDebugOverlay />
       <MobileSubmenus />
+
+      {soundUnlockVisible && (
+        <button
+          type="button"
+          onClick={() => {
+            document.querySelectorAll<HTMLAudioElement>('audio[data-remote-audio="true"]').forEach((audio) => {
+              audio.muted = false;
+              audio.volume = 1;
+              void audio.play().catch(() => undefined);
+            });
+            setSoundUnlockVisible(false);
+          }}
+          className="fixed left-1/2 top-[max(1rem,env(safe-area-inset-top))] z-[80] -translate-x-1/2 rounded-full border border-border bg-background/95 px-4 py-2 text-sm font-semibold text-foreground shadow-lg backdrop-blur-md md:hidden"
+        >
+          Tap to enable sound
+        </button>
+      )}
 
       {/* Recording download prompt after meeting */}
       {recordingBlob && screen === 'lobby' && (
