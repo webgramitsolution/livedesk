@@ -4,6 +4,7 @@ import { useMeetingStore } from '@/store/meetingStore';
 import { createNoiseCancelledStream } from '@/lib/audio/noiseCancellation';
 import { toast } from 'sonner';
 import { logWebRTCEvent } from '@/lib/webrtcLogger';
+import { takePreflightStream } from '@/lib/mediaPreflight';
 
 const ICE_SERVERS: RTCConfiguration = {
   iceServers: [
