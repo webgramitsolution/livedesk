@@ -73,6 +73,10 @@ export function VideoTile({ participant, subtitle, compact, mediaStream }: Video
   const videoRef = useRef<HTMLVideoElement>(null);
   const remoteAudioStreamRef = useRef<MediaStream | null>(null);
   const [audioBlocked, setAudioBlocked] = useState(false);
+  const markAudioBlocked = () => {
+    setAudioBlocked(true);
+    window.dispatchEvent(new CustomEvent('remote-audio-blocked'));
+  };
   const gradientIndex = participant.id
     .split('')
     .reduce((sum, char) => sum + char.charCodeAt(0), 0) % GRADIENT_PALETTES.length;
@@ -117,7 +121,7 @@ export function VideoTile({ participant, subtitle, compact, mediaStream }: Video
       ]);
 
       if (participant.id !== '1' && playResults.some((result) => result.status === 'rejected')) {
-        setAudioBlocked(true);
+        markAudioBlocked();
       }
     };
 
@@ -125,7 +129,7 @@ export function VideoTile({ participant, subtitle, compact, mediaStream }: Video
 
     const retryAudio = () => {
       if (participant.id === '1') return;
-      void audioRef.current?.play().then(() => setAudioBlocked(false)).catch(() => setAudioBlocked(true));
+      void audioRef.current?.play().then(() => setAudioBlocked(false)).catch(markAudioBlocked);
     };
 
     const audioTracks = mediaStream.getAudioTracks();
@@ -155,7 +159,7 @@ export function VideoTile({ participant, subtitle, compact, mediaStream }: Video
       await Promise.all([videoRef.current?.play(), audioRef.current?.play()]);
       setAudioBlocked(false);
     } catch {
-      setAudioBlocked(true);
+      markAudioBlocked();
     }
   };
 
