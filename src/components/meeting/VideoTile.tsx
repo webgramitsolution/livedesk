@@ -1,7 +1,7 @@
 import { MicOff, VideoOff, Hand, Languages, Volume2, VolumeX, AlertTriangle } from 'lucide-react';
 import { type Participant, type FloatingReaction, useMeetingStore } from '@/store/meetingStore';
 import { motion, AnimatePresence } from 'framer-motion';
-import { useEffect, useMemo, useState, useRef } from 'react';
+import { useCallback, useEffect, useMemo, useState, useRef } from 'react';
 
 interface VideoTileProps {
   participant: Participant;
@@ -73,10 +73,10 @@ export function VideoTile({ participant, subtitle, compact, mediaStream }: Video
   const videoRef = useRef<HTMLVideoElement>(null);
   const remoteAudioStreamRef = useRef<MediaStream | null>(null);
   const [audioBlocked, setAudioBlocked] = useState(false);
-  const markAudioBlocked = () => {
+  const markAudioBlocked = useCallback(() => {
     setAudioBlocked(true);
     window.dispatchEvent(new CustomEvent('remote-audio-blocked'));
-  };
+  }, []);
   const gradientIndex = participant.id
     .split('')
     .reduce((sum, char) => sum + char.charCodeAt(0), 0) % GRADIENT_PALETTES.length;
@@ -152,7 +152,7 @@ export function VideoTile({ participant, subtitle, compact, mediaStream }: Video
         if (audioRef.current) audioRef.current.srcObject = null;
       }
     };
-  }, [mediaStream, participant.id]);
+  }, [markAudioBlocked, mediaStream, participant.id]);
 
   const handleEnableAudio = async () => {
     try {
