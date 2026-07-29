@@ -20,6 +20,7 @@ import { useIsMobile } from '@/hooks/use-mobile';
 import { useWebRTC } from '@/hooks/useWebRTC';
 import { useMeetingRecorder } from '@/hooks/useMeetingRecorder';
 import { useVirtualBackground } from '@/hooks/useVirtualBackground';
+import { recoverRemoteAudioPlayback } from '@/lib/remoteAudioRecovery';
 import { useMeetingStore } from '@/store/meetingStore';
 import { motion } from 'framer-motion';
 import { useState, useEffect, useRef } from 'react';
@@ -35,7 +36,7 @@ export function MeetingRoom() {
   const setRightPanel = useMeetingStore((s) => s.setRightPanel);
   const isMobile = useIsMobile();
   const videoAreaRef = useRef<HTMLDivElement>(null);
-  const { localStream, remoteStreams, screenStream, remoteScreenStream, getPeerStats, getPeerDiagnostics, selectLocalDevices } = useWebRTC(meetingId, screen === 'meeting');
+  const { localStream, remoteStreams, screenStream, remoteScreenStream, remoteScreenPeerId, getPeerStats, getPeerDiagnostics, getDiagnosticsSnapshot, selectLocalDevices } = useWebRTC(meetingId, screen === 'meeting');
 
   const PANEL_CYCLE: Array<'ai' | 'participants' | 'chat'> = ['ai', 'participants', 'chat'];
   useSwipeGesture(videoAreaRef, {
@@ -61,25 +62,31 @@ export function MeetingRoom() {
     if (screen !== 'meeting') return;
 
     const unlockAudio = () => {
-      document.querySelectorAll<HTMLAudioElement>('audio[data-remote-audio="true"]').forEach((audio) => {
-        audio.muted = false;
-        audio.volume = 1;
-        void audio.play().catch(() => undefined);
+      void recoverRemoteAudioPlayback('global-unlock').then((result) => {
+        setSoundUnlockVisible(result.blocked > 0);
       });
-      setSoundUnlockVisible(false);
     };
 
     const onBlocked = () => setSoundUnlockVisible(true);
+    const onVisibility = () => {
+      if (document.visibilityState === 'visible') unlockAudio();
+    };
     window.addEventListener('remote-audio-blocked', onBlocked);
     window.addEventListener('pointerdown', unlockAudio, { passive: true });
     window.addEventListener('touchend', unlockAudio, { passive: true });
     window.addEventListener('keydown', unlockAudio);
+    window.addEventListener('online', unlockAudio);
+    window.addEventListener('pageshow', unlockAudio);
+    document.addEventListener('visibilitychange', onVisibility);
 
     return () => {
       window.removeEventListener('remote-audio-blocked', onBlocked);
       window.removeEventListener('pointerdown', unlockAudio);
       window.removeEventListener('touchend', unlockAudio);
       window.removeEventListener('keydown', unlockAudio);
+      window.removeEventListener('online', unlockAudio);
+      window.removeEventListener('pageshow', unlockAudio);
+      document.removeEventListener('visibilitychange', onVisibility);
     };
   }, [screen]);
 
@@ -144,7 +151,7 @@ export function MeetingRoom() {
       <NavigationBar />
       <div className="flex-1 flex overflow-hidden">
         <div ref={videoAreaRef} className="flex-1 relative flex flex-col min-w-0">
-          <VideoGrid localStream={processedLocalStream} remoteStreams={remoteStreams} screenStream={screenStream} remoteScreenStream={remoteScreenStream} />
+          <VideoGrid localStream={processedLocalStream} remoteStreams={remoteStreams} screenStream={screenStream} remoteScreenStream={remoteScreenStream} remoteScreenPeerId={remoteScreenPeerId} />
           <FloatingControlBar />
         </div>
         <AISidebar />
@@ -157,8 +164,8 @@ export function MeetingRoom() {
       <KeyboardShortcutsOverlay isOpen={showHelp} onClose={() => setShowHelp(false)} />
       <PipOverlay />
       <JoinRequestNotifier />
-      <PerformanceHud getPeerStats={getPeerStats} getPeerDiagnostics={getPeerDiagnostics} />
-      <MediaDiagnosticsPanel onSelectDevices={selectLocalDevices} />
+      <PerformanceHud getPeerStats={getPeerStats} getPeerDiagnostics={getPeerDiagnostics} getDiagnosticsSnapshot={getDiagnosticsSnapshot} />
+      <MediaDiagnosticsPanel onSelectDevices={selectLocalDevices} getDiagnosticsSnapshot={getDiagnosticsSnapshot} />
       <AlignmentDebugOverlay />
       <MobileSubmenus />
 
@@ -166,12 +173,9 @@ export function MeetingRoom() {
         <button
           type="button"
           onClick={() => {
-            document.querySelectorAll<HTMLAudioElement>('audio[data-remote-audio="true"]').forEach((audio) => {
-              audio.muted = false;
-              audio.volume = 1;
-              void audio.play().catch(() => undefined);
+            void recoverRemoteAudioPlayback('tap-to-enable').then((result) => {
+              setSoundUnlockVisible(result.blocked > 0);
             });
-            setSoundUnlockVisible(false);
           }}
           className="fixed left-1/2 top-[max(1rem,env(safe-area-inset-top))] z-[80] -translate-x-1/2 rounded-full border border-border bg-background/95 px-4 py-2 text-sm font-semibold text-foreground shadow-lg backdrop-blur-md md:hidden"
         >
