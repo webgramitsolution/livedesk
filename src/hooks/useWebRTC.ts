@@ -408,6 +408,7 @@ export function useWebRTC(meetingId: string, isInMeeting: boolean) {
       await pc.setRemoteDescription(new RTCSessionDescription(offer));
       const answer = await pc.createAnswer();
       await pc.setLocalDescription(answer);
+      setLastRenegotiationAt();
 
       logWebRTCEvent('signal', 'send-answer', undefined, from);
       channelRef.current?.send({
@@ -420,7 +421,7 @@ export function useWebRTC(meetingId: string, isInMeeting: boolean) {
         },
       });
     },
-    [createPeerConnection, isPolitePeer]
+    [createPeerConnection, isPolitePeer, setLastRenegotiationAt]
   );
 
   const handleAnswer = useCallback(
@@ -464,6 +465,7 @@ export function useWebRTC(meetingId: string, isInMeeting: boolean) {
         }
 
         await pc.setLocalDescription(offer);
+        setLastRenegotiationAt();
 
         logWebRTCEvent('signal', 'send-offer', undefined, peerId);
         channelRef.current?.send({
@@ -479,7 +481,7 @@ export function useWebRTC(meetingId: string, isInMeeting: boolean) {
         makingOfferRef.current.set(peerId, false);
       }
     },
-    [createPeerConnection]
+    [createPeerConnection, setLastRenegotiationAt]
   );
 
   // Auto-retry / resubscribe: if inbound audio+video haven't arrived within
