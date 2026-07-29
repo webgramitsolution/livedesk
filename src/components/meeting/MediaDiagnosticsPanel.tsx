@@ -83,7 +83,7 @@ export function MediaDiagnosticsPanel({ onSelectDevices }: Props) {
 
   return (
     <>
-      <div className="fixed left-3 top-[calc(env(safe-area-inset-top)+4.5rem)] z-[70] flex max-w-[calc(100vw-1.5rem)] items-center gap-2 rounded-full border border-border bg-background/92 px-3 py-2 text-[11px] font-medium text-foreground shadow-lg backdrop-blur-md md:left-4 md:top-20">
+      <div className="fixed left-3 top-[calc(env(safe-area-inset-top)+4.5rem)] z-[70] flex max-w-[calc(100vw-1.5rem)] items-center gap-2 rounded-full border border-border bg-background/95 px-3 py-2 text-[11px] font-medium text-foreground shadow-lg backdrop-blur-md md:left-4 md:top-20">
         <span className={`inline-flex items-center gap-1 ${statusTone(status.audio)}`} title={status.audioLabel}>
           {status.audio === 'ok' ? <Mic className="h-3.5 w-3.5" /> : <MicOff className="h-3.5 w-3.5" />}
           {statusLabel(status.audio)}
@@ -101,7 +101,7 @@ export function MediaDiagnosticsPanel({ onSelectDevices }: Props) {
           aria-label="Open media diagnostics"
         >
           <RefreshCw className={`h-3.5 w-3.5 ${status.audio === 'retrying' || status.video === 'retrying' ? 'animate-spin' : ''}`} />
-          <span className="hidden xs:inline">Media</span>
+          <span className="hidden sm:inline">Media</span>
         </button>
       </div>
 
