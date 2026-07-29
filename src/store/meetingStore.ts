@@ -92,6 +92,8 @@ interface MeetingState {
   setScreen: (screen: AppScreen) => void;
   setMeetingId: (id: string) => void;
   setUserName: (name: string) => void;
+  setMicOn: (enabled: boolean) => void;
+  setCameraOn: (enabled: boolean) => void;
   toggleMic: () => void;
   toggleCamera: () => void;
   toggleScreenShare: () => void;
@@ -268,6 +270,8 @@ export const useMeetingStore = create<MeetingState>((set) => ({
   setScreen: (screen) => set({ screen }),
   setMeetingId: (meetingId) => set({ meetingId }),
   setUserName: (userName) => set({ userName }),
+  setMicOn: (isMicOn) => set({ isMicOn }),
+  setCameraOn: (isCameraOn) => set({ isCameraOn }),
   toggleMic: () => set((s) => ({ isMicOn: !s.isMicOn })),
   toggleCamera: () => set((s) => ({ isCameraOn: !s.isCameraOn })),
   toggleScreenShare: () => set((s) => ({ isScreenSharing: !s.isScreenSharing })),

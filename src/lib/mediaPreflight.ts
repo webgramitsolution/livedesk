@@ -14,6 +14,12 @@ export interface MeetingMediaAccessResult {
   cameraLabel: string;
 }
 
+interface RequestMeetingMediaOptions {
+  audio?: boolean;
+  video?: boolean;
+  preferCombined?: boolean;
+}
+
 export const MEETING_AUDIO_CONSTRAINTS: MediaTrackConstraints = {
   echoCancellation: true,
   noiseSuppression: true,
@@ -57,7 +63,7 @@ export function statusForMediaError(err: unknown): MediaAccessStatus {
   return 'denied';
 }
 
-export async function requestMeetingMedia(): Promise<MeetingMediaAccessResult> {
+export async function requestMeetingMedia(options: RequestMeetingMediaOptions = {}): Promise<MeetingMediaAccessResult> {
   if (!navigator.mediaDevices?.getUserMedia) {
     return {
       stream: null,
@@ -69,15 +75,28 @@ export async function requestMeetingMedia(): Promise<MeetingMediaAccessResult> {
   }
 
   const merged = new MediaStream();
+  const wantsAudio = options.audio ?? true;
+  const wantsVideo = options.video ?? true;
+  const preferCombined = options.preferCombined ?? true;
   let mic: MediaAccessStatus = 'denied';
   let camera: MediaAccessStatus = 'denied';
   let micLabel = 'Mic access blocked';
   let cameraLabel = 'Camera access blocked';
 
+  if (!wantsAudio) {
+    mic = 'unavailable';
+    micLabel = 'Microphone not requested';
+  }
+  if (!wantsVideo) {
+    camera = 'unavailable';
+    cameraLabel = 'Camera not requested';
+  }
+
   try {
+    if (!preferCombined || (!wantsAudio && !wantsVideo)) throw new DOMException('Combined request skipped', 'AbortError');
     const combined = await navigator.mediaDevices.getUserMedia({
-      audio: MEETING_AUDIO_CONSTRAINTS,
-      video: MEETING_VIDEO_CONSTRAINTS,
+      audio: wantsAudio ? MEETING_AUDIO_CONSTRAINTS : false,
+      video: wantsVideo ? MEETING_VIDEO_CONSTRAINTS : false,
     });
     combined.getTracks().forEach((track) => {
       track.enabled = true;
@@ -105,7 +124,7 @@ export async function requestMeetingMedia(): Promise<MeetingMediaAccessResult> {
     // the microphone, and a missing mic doesn't block camera-only joining.
   }
 
-  try {
+  if (wantsAudio) try {
     const audioStream = await navigator.mediaDevices.getUserMedia({ audio: MEETING_AUDIO_CONSTRAINTS, video: false });
     audioStream.getAudioTracks().forEach((track) => {
       track.enabled = true;
@@ -121,7 +140,7 @@ export async function requestMeetingMedia(): Promise<MeetingMediaAccessResult> {
     micLabel = mic === 'unavailable' ? 'No microphone found' : 'Mic access blocked';
   }
 
-  try {
+  if (wantsVideo) try {
     const videoStream = await navigator.mediaDevices.getUserMedia({ audio: false, video: MEETING_VIDEO_CONSTRAINTS });
     videoStream.getVideoTracks().forEach((track) => {
       track.enabled = true;

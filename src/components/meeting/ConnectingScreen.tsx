@@ -49,7 +49,7 @@ function DeviceRow({ icon: Icon, label, deviceName, status }: { icon: React.Elem
 }
 
 export function ConnectingScreen() {
-  const { setScreen, meetingId, isMicOn, isCameraOn, toggleMic, toggleCamera } = useMeetingStore();
+  const { setScreen, meetingId, setMicOn, setCameraOn } = useMeetingStore();
   const [diagnostics, setDiagnostics] = useState<DeviceDiagnostics>(IDLE_DIAGNOSTICS);
   const [consentAsked, setConsentAsked] = useState(false);
   const [allChecked, setAllChecked] = useState(false);
@@ -94,14 +94,14 @@ export function ConnectingScreen() {
       micLabel: 'Requesting access…', cameraLabel: 'Requesting access…',
     }));
 
-    const result = await requestMeetingMedia();
+    const result = await requestMeetingMedia({ preferCombined: true });
     const micStatus = result.mic;
     const camStatus = result.camera;
     const micLabel = result.micLabel;
     const camLabel = result.cameraLabel;
 
-    if (micStatus === 'granted' && !isMicOn) toggleMic();
-    if (camStatus === 'granted' && !isCameraOn) toggleCamera();
+    setMicOn(micStatus === 'granted');
+    setCameraOn(camStatus === 'granted');
 
     // Keep granted tracks alive and hand them to the meeting so the browser is
     // never asked for the same devices twice.
@@ -112,7 +112,7 @@ export function ConnectingScreen() {
       camera: camStatus, cameraLabel: camLabel,
     }));
     setAllChecked(true);
-  }, [isCameraOn, isMicOn, toggleCamera, toggleMic]);
+  }, [setCameraOn, setMicOn]);
 
   // Auto-run once consent is implied by an existing browser grant.
   useEffect(() => {
