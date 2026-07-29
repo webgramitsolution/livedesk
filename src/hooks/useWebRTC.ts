@@ -279,6 +279,7 @@ export function useWebRTC(meetingId: string, isInMeeting: boolean) {
 
   // Schedule a re-subscribe / renegotiation if inbound tracks don't arrive.
   const scheduleTrackRetryRef = useRef<(peerId: string) => void>(() => {});
+  const schedulePeerRestartRef = useRef<(peerId: string, reason: string) => void>(() => {});
 
   const createPeerConnection = useCallback(
     (peerId: string): RTCPeerConnection => {
