@@ -53,6 +53,7 @@ export function useWebRTC(meetingId: string, isInMeeting: boolean) {
   const peersRef = useRef<Map<string, PeerConnection>>(new Map());
   const channelRef = useRef<ReturnType<typeof supabase.channel> | null>(null);
   const noiseCancellationCleanupRef = useRef<(() => void) | null>(null);
+  const mediaAcquireInFlightRef = useRef(false);
   const makingOfferRef = useRef<Map<string, boolean>>(new Map());
   const retryStateRef = useRef<Map<string, { count: number; timer: ReturnType<typeof setTimeout> | null }>>(new Map());
   const myPeerIdRef = useRef<string>(crypto.randomUUID());
@@ -60,7 +61,7 @@ export function useWebRTC(meetingId: string, isInMeeting: boolean) {
   const [screenStream, setScreenStream] = useState<MediaStream | null>(null);
   const [remoteStreams, setRemoteStreams] = useState<Map<string, MediaStream>>(new Map());
   const [remoteScreenStream, setRemoteScreenStream] = useState<MediaStream | null>(null);
-  const { isMicOn, isCameraOn, isScreenSharing, toggleScreenShare, isNoiseCancellationOn, meetingSessionId, setSelfCapture } = useMeetingStore();
+  const { isMicOn, isCameraOn, isScreenSharing, toggleScreenShare, isNoiseCancellationOn, meetingSessionId, setSelfCapture, setMicOn, setCameraOn } = useMeetingStore();
 
   const ensurePresenceReady = useCallback(async () => {
     if (!meetingId || !meetingSessionId) return false;
@@ -632,6 +633,52 @@ export function useWebRTC(meetingId: string, isInMeeting: boolean) {
     }
   }, [sendOfferToPeer]);
 
+  const mergeRawLocalTracks = useCallback((incomingStream: MediaStream) => {
+    const current = rawLocalStreamRef.current;
+
+    if (!current) {
+      rawLocalStreamRef.current = incomingStream;
+      applyProcessedLocalStream(incomingStream);
+      return;
+    }
+
+    incomingStream.getTracks().forEach((track) => {
+      const existingSameKind = current.getTracks().find((existing) => existing.kind === track.kind && existing.readyState === 'live');
+      if (existingSameKind) {
+        track.stop();
+        return;
+      }
+
+      track.enabled = track.kind === 'audio' ? useMeetingStore.getState().isMicOn : useMeetingStore.getState().isCameraOn;
+      current.addTrack(track);
+    });
+
+    applyProcessedLocalStream(current);
+  }, [applyProcessedLocalStream]);
+
+  const acquireMissingLocalMedia = useCallback(async (needsAudio: boolean, needsVideo: boolean) => {
+    if (!isInMeeting || mediaAcquireInFlightRef.current || (!needsAudio && !needsVideo)) return;
+
+    mediaAcquireInFlightRef.current = true;
+    try {
+      const result = await requestMeetingMedia({ audio: needsAudio, video: needsVideo, preferCombined: false });
+      if (result.stream) {
+        mergeRawLocalTracks(result.stream);
+      }
+
+      if (needsAudio) setMicOn(result.mic === 'granted');
+      if (needsVideo) setCameraOn(result.camera === 'granted');
+
+      if ((needsAudio && result.mic === 'granted') || (needsVideo && result.camera === 'granted')) {
+        toast.success('Camera/microphone connected');
+      } else {
+        toast.error('Camera/microphone permission is still blocked');
+      }
+    } finally {
+      mediaAcquireInFlightRef.current = false;
+    }
+  }, [isInMeeting, mergeRawLocalTracks, setCameraOn, setMicOn]);
+
   useEffect(() => {
     const rawStream = rawLocalStreamRef.current;
     if (!rawStream) return;
@@ -670,8 +717,7 @@ export function useWebRTC(meetingId: string, isInMeeting: boolean) {
           preflight.getTracks().forEach((t) => t.stop());
           return;
         }
-        rawLocalStreamRef.current = preflight;
-        applyProcessedLocalStream(preflight);
+        mergeRawLocalTracks(preflight);
         return;
       }
       try {
@@ -685,8 +731,7 @@ export function useWebRTC(meetingId: string, isInMeeting: boolean) {
           stream.getTracks().forEach((t) => t.stop());
           return;
         }
-        rawLocalStreamRef.current = stream;
-        applyProcessedLocalStream(stream);
+        mergeRawLocalTracks(stream);
       } catch (err) {
         console.error('No media devices available:', err);
       }
@@ -708,7 +753,7 @@ export function useWebRTC(meetingId: string, isInMeeting: boolean) {
       screenStreamRef.current = null;
       setScreenStream(null);
     };
-  }, [applyProcessedLocalStream, isInMeeting]);
+  }, [isInMeeting, mergeRawLocalTracks]);
 
   // Sync mic/camera toggle to local stream
   useEffect(() => {
@@ -720,7 +765,11 @@ export function useWebRTC(meetingId: string, isInMeeting: boolean) {
 
     syncAudioState(localStreamRef.current);
     syncAudioState(rawLocalStreamRef.current);
-  }, [isMicOn]);
+    if (isMicOn) {
+      const hasLiveAudio = rawLocalStreamRef.current?.getAudioTracks().some((t) => t.readyState === 'live') ?? false;
+      if (!hasLiveAudio) void acquireMissingLocalMedia(true, false);
+    }
+  }, [acquireMissingLocalMedia, isMicOn]);
 
   useEffect(() => {
     const syncVideoState = (stream: MediaStream | null) => {
@@ -731,7 +780,11 @@ export function useWebRTC(meetingId: string, isInMeeting: boolean) {
 
     syncVideoState(localStreamRef.current);
     syncVideoState(rawLocalStreamRef.current);
-  }, [isCameraOn]);
+    if (isCameraOn) {
+      const hasLiveVideo = rawLocalStreamRef.current?.getVideoTracks().some((t) => t.readyState === 'live') ?? false;
+      if (!hasLiveVideo) void acquireMissingLocalMedia(false, true);
+    }
+  }, [acquireMissingLocalMedia, isCameraOn]);
 
   // Setup signaling channel
   useEffect(() => {
