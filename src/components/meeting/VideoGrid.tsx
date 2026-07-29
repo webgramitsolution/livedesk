@@ -13,6 +13,7 @@ interface VideoGridProps {
   remoteStreams?: Map<string, MediaStream>;
   screenStream?: MediaStream | null;
   remoteScreenStream?: MediaStream | null;
+  remoteScreenPeerId?: string | null;
 }
 
 function ScreenShareVideo({ stream, isLocal }: { stream: MediaStream; isLocal?: boolean }) {
@@ -38,7 +39,7 @@ function ScreenShareVideo({ stream, isLocal }: { stream: MediaStream; isLocal?: 
   );
 }
 
-export function VideoGrid({ localStream, remoteStreams, screenStream, remoteScreenStream }: VideoGridProps) {
+export function VideoGrid({ localStream, remoteStreams, screenStream, remoteScreenStream, remoteScreenPeerId }: VideoGridProps) {
   const { participants, transcript, isTranslationEnabled, isScreenSharing, isSelfCapture, toggleScreenShare, selectedLanguage, meetingId } =
     useMeetingStore();
   const [whiteboardActive, setWhiteboardActive] = useState(false);
@@ -51,6 +52,7 @@ export function VideoGrid({ localStream, remoteStreams, screenStream, remoteScre
     meetingId,
     isInMeeting: true,
     isLocalPresenter: isScreenSharing,
+    presenterHintId: remoteScreenPeerId,
     onExecuteInput: (event) => {
       // Presenter side: dispatch the incoming input into the tab.
       executeInput(event);

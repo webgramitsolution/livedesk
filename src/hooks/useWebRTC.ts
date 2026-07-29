@@ -260,7 +260,7 @@ export function useWebRTC(meetingId: string, isInMeeting: boolean) {
       try {
         const reports = await peer.pc.getStats();
         reports.forEach((report) => {
-          stats.push({ ...(report.toJSON?.() ?? report), id: report.id, type: report.type, timestamp: report.timestamp });
+          stats.push({ ...Object.fromEntries(Object.entries(report)), id: report.id, type: report.type, timestamp: report.timestamp });
         });
       } catch (error) {
         stats.push({ type: 'stats-error', error: String(error) });
@@ -1274,8 +1274,10 @@ export function useWebRTC(meetingId: string, isInMeeting: boolean) {
           if (peer) {
             peer.pc.close();
             peersRef.current.delete(payload.peerId);
+            remoteScreenByPeerRef.current.delete(payload.peerId);
             updateRemoteStreams();
-            setRemoteScreenStream(null);
+            setRemoteScreenPeerId((current) => (current === payload.peerId ? null : current));
+            setRemoteScreenStream((current) => (remoteScreenPeerId === payload.peerId ? null : current));
           }
         })
         .subscribe((status) => {
@@ -1309,6 +1311,8 @@ export function useWebRTC(meetingId: string, isInMeeting: boolean) {
       peerRestartStateRef.current.forEach((restart) => restart.timer && clearTimeout(restart.timer));
       peerRestartStateRef.current.clear();
       setRemoteStreams(new Map());
+      remoteScreenByPeerRef.current.clear();
+      setRemoteScreenPeerId(null);
       setRemoteScreenStream(null);
 
       if (channel) supabase.removeChannel(channel);
@@ -1321,9 +1325,11 @@ export function useWebRTC(meetingId: string, isInMeeting: boolean) {
     remoteStreams,
     screenStream,
     remoteScreenStream,
+    remoteScreenPeerId,
     myPeerId: myPeerIdRef.current,
     getPeerStats,
     getPeerDiagnostics,
+    getDiagnosticsSnapshot,
     selectLocalDevices,
   };
 }

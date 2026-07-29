@@ -3,11 +3,12 @@ import { AnimatePresence, motion } from 'framer-motion';
 import { Camera, CameraOff, CheckCircle2, Download, Mic, MicOff, RefreshCw, Share2, Smartphone, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { useMeetingStore } from '@/store/meetingStore';
-import { downloadWebRTCLog, shareWebRTCLog } from '@/lib/webrtcLogger';
+import { downloadWebRTCDiagnostics, shareWebRTCDiagnostics } from '@/lib/webrtcLogger';
 import type { LocalDeviceSelection } from '@/hooks/useWebRTC';
 
 interface Props {
   onSelectDevices?: (selection: LocalDeviceSelection) => void;
+  getDiagnosticsSnapshot?: () => Promise<unknown> | unknown;
 }
 
 type DeviceOption = { deviceId: string; label: string; kind: MediaDeviceKind };
@@ -27,7 +28,7 @@ function statusLabel(status: string) {
   return 'Missing';
 }
 
-export function MediaDiagnosticsPanel({ onSelectDevices }: Props) {
+export function MediaDiagnosticsPanel({ onSelectDevices, getDiagnosticsSnapshot }: Props) {
   const meetingId = useMeetingStore((s) => s.meetingId);
   const status = useMeetingStore((s) => s.localMediaStatus);
   const selectedAudioInput = useMeetingStore((s) => s.selectedAudioInput);
@@ -204,10 +205,10 @@ export function MediaDiagnosticsPanel({ onSelectDevices }: Props) {
                   <Button type="button" onClick={applySelection} className="h-11 flex-1">
                     <RefreshCw className="mr-2 h-4 w-4" /> Reconnect devices
                   </Button>
-                  <Button type="button" variant="outline" onClick={() => downloadWebRTCLog(meetingId || 'session')} className="h-11 sm:w-28">
+                  <Button type="button" variant="outline" onClick={() => void downloadWebRTCDiagnostics(meetingId || 'session', getDiagnosticsSnapshot)} className="h-11 sm:w-28">
                     <Download className="mr-2 h-4 w-4" /> Log
                   </Button>
-                  <Button type="button" variant="outline" onClick={() => void shareWebRTCLog(meetingId || 'session')} className="h-11 sm:w-28">
+                  <Button type="button" variant="outline" onClick={() => void shareWebRTCDiagnostics(meetingId || 'session', getDiagnosticsSnapshot)} className="h-11 sm:w-28">
                     <Share2 className="mr-2 h-4 w-4" /> Share
                   </Button>
                 </div>
