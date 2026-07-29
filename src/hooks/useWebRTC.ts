@@ -720,10 +720,15 @@ export function useWebRTC(meetingId: string, isInMeeting: boolean) {
         mergeRawLocalTracks(preflight);
         return;
       }
+
+      if (mediaAcquireInFlightRef.current) return;
+      mediaAcquireInFlightRef.current = true;
       try {
-        const result = await requestMeetingMedia();
+        const result = await requestMeetingMedia({ preferCombined: true });
         const stream = result.stream;
         if (!stream) {
+          setMicOn(false);
+          setCameraOn(false);
           console.warn('No media devices granted for this meeting');
           return;
         }
@@ -732,8 +737,12 @@ export function useWebRTC(meetingId: string, isInMeeting: boolean) {
           return;
         }
         mergeRawLocalTracks(stream);
+        setMicOn(result.mic === 'granted');
+        setCameraOn(result.camera === 'granted');
       } catch (err) {
         console.error('No media devices available:', err);
+      } finally {
+        mediaAcquireInFlightRef.current = false;
       }
     }
 
@@ -753,7 +762,7 @@ export function useWebRTC(meetingId: string, isInMeeting: boolean) {
       screenStreamRef.current = null;
       setScreenStream(null);
     };
-  }, [isInMeeting, mergeRawLocalTracks]);
+  }, [isInMeeting, mergeRawLocalTracks, setCameraOn, setMicOn]);
 
   // Sync mic/camera toggle to local stream
   useEffect(() => {
