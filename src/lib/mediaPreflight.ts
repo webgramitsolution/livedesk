@@ -5,6 +5,14 @@
 let readyStream: MediaStream | null = null;
 
 export type MediaAccessStatus = 'granted' | 'denied' | 'unavailable';
+export type MediaErrorReason =
+  | 'unsupported'
+  | 'permission-denied'
+  | 'device-not-found'
+  | 'device-busy'
+  | 'constraints-failed'
+  | 'request-aborted'
+  | 'unknown-error';
 
 export interface MeetingMediaAccessResult {
   stream: MediaStream | null;
@@ -12,12 +20,17 @@ export interface MeetingMediaAccessResult {
   camera: MediaAccessStatus;
   micLabel: string;
   cameraLabel: string;
+  micReason?: MediaErrorReason;
+  cameraReason?: MediaErrorReason;
 }
 
-interface RequestMeetingMediaOptions {
+export interface RequestMeetingMediaOptions {
   audio?: boolean;
   video?: boolean;
   preferCombined?: boolean;
+  audioDeviceId?: string;
+  videoDeviceId?: string;
+  facingMode?: 'user' | 'environment';
 }
 
 export const MEETING_AUDIO_CONSTRAINTS: MediaTrackConstraints = {
@@ -63,6 +76,37 @@ export function statusForMediaError(err: unknown): MediaAccessStatus {
   return 'denied';
 }
 
+export function reasonForMediaError(err: unknown): MediaErrorReason {
+  const name = (err as { name?: string })?.name;
+  if (name === 'NotAllowedError' || name === 'PermissionDeniedError' || name === 'SecurityError') return 'permission-denied';
+  if (name === 'NotFoundError' || name === 'DevicesNotFoundError') return 'device-not-found';
+  if (name === 'NotReadableError' || name === 'TrackStartError') return 'device-busy';
+  if (name === 'OverconstrainedError' || name === 'ConstraintNotSatisfiedError') return 'constraints-failed';
+  if (name === 'AbortError') return 'request-aborted';
+  return 'unknown-error';
+}
+
+function cleanDeviceId(deviceId?: string) {
+  return deviceId && deviceId !== 'default' ? deviceId : undefined;
+}
+
+export function buildAudioConstraints(deviceId?: string): MediaTrackConstraints {
+  const exactDeviceId = cleanDeviceId(deviceId);
+  return {
+    ...MEETING_AUDIO_CONSTRAINTS,
+    ...(exactDeviceId ? { deviceId: { exact: exactDeviceId } } : {}),
+  };
+}
+
+export function buildVideoConstraints(deviceId?: string, facingMode: 'user' | 'environment' = 'user'): MediaTrackConstraints {
+  const exactDeviceId = cleanDeviceId(deviceId);
+  return {
+    ...MEETING_VIDEO_CONSTRAINTS,
+    facingMode: exactDeviceId ? undefined : facingMode,
+    ...(exactDeviceId ? { deviceId: { exact: exactDeviceId } } : {}),
+  };
+}
+
 export async function requestMeetingMedia(options: RequestMeetingMediaOptions = {}): Promise<MeetingMediaAccessResult> {
   if (!navigator.mediaDevices?.getUserMedia) {
     return {
@@ -71,6 +115,8 @@ export async function requestMeetingMedia(options: RequestMeetingMediaOptions = 
       camera: 'unavailable',
       micLabel: 'Microphone unsupported',
       cameraLabel: 'Camera unsupported',
+      micReason: 'unsupported',
+      cameraReason: 'unsupported',
     };
   }
 
@@ -82,6 +128,8 @@ export async function requestMeetingMedia(options: RequestMeetingMediaOptions = 
   let camera: MediaAccessStatus = 'denied';
   let micLabel = 'Mic access blocked';
   let cameraLabel = 'Camera access blocked';
+  let micReason: MediaErrorReason | undefined;
+  let cameraReason: MediaErrorReason | undefined;
 
   if (!wantsAudio) {
     mic = 'unavailable';
@@ -95,8 +143,8 @@ export async function requestMeetingMedia(options: RequestMeetingMediaOptions = 
   try {
     if (!preferCombined || (!wantsAudio && !wantsVideo)) throw new DOMException('Combined request skipped', 'AbortError');
     const combined = await navigator.mediaDevices.getUserMedia({
-      audio: wantsAudio ? MEETING_AUDIO_CONSTRAINTS : false,
-      video: wantsVideo ? MEETING_VIDEO_CONSTRAINTS : false,
+      audio: wantsAudio ? buildAudioConstraints(options.audioDeviceId) : false,
+      video: wantsVideo ? buildVideoConstraints(options.videoDeviceId, options.facingMode) : false,
     });
     combined.getTracks().forEach((track) => {
       track.enabled = true;
@@ -107,10 +155,12 @@ export async function requestMeetingMedia(options: RequestMeetingMediaOptions = 
     if (audioTrack) {
       mic = 'granted';
       micLabel = audioTrack.label || 'Microphone';
+      micReason = undefined;
     }
     if (videoTrack) {
       camera = 'granted';
       cameraLabel = videoTrack.label || 'Camera';
+      cameraReason = undefined;
     }
     return {
       stream: merged.getTracks().length ? merged : null,
@@ -118,14 +168,19 @@ export async function requestMeetingMedia(options: RequestMeetingMediaOptions = 
       camera,
       micLabel,
       cameraLabel,
+      micReason,
+      cameraReason,
     };
-  } catch {
+  } catch (combinedErr) {
+    const reason = reasonForMediaError(combinedErr);
+    if (wantsAudio) micReason = reason;
+    if (wantsVideo) cameraReason = reason;
     // Fall back to individual requests so a bad/missing camera doesn't block
     // the microphone, and a missing mic doesn't block camera-only joining.
   }
 
   if (wantsAudio) try {
-    const audioStream = await navigator.mediaDevices.getUserMedia({ audio: MEETING_AUDIO_CONSTRAINTS, video: false });
+    const audioStream = await navigator.mediaDevices.getUserMedia({ audio: buildAudioConstraints(options.audioDeviceId), video: false });
     audioStream.getAudioTracks().forEach((track) => {
       track.enabled = true;
       merged.addTrack(track);
@@ -134,14 +189,16 @@ export async function requestMeetingMedia(options: RequestMeetingMediaOptions = 
     if (audioTrack) {
       mic = 'granted';
       micLabel = audioTrack.label || 'Microphone';
+      micReason = undefined;
     }
   } catch (audioErr) {
     mic = statusForMediaError(audioErr);
+    micReason = reasonForMediaError(audioErr);
     micLabel = mic === 'unavailable' ? 'No microphone found' : 'Mic access blocked';
   }
 
   if (wantsVideo) try {
-    const videoStream = await navigator.mediaDevices.getUserMedia({ audio: false, video: MEETING_VIDEO_CONSTRAINTS });
+    const videoStream = await navigator.mediaDevices.getUserMedia({ audio: false, video: buildVideoConstraints(options.videoDeviceId, options.facingMode) });
     videoStream.getVideoTracks().forEach((track) => {
       track.enabled = true;
       merged.addTrack(track);
@@ -150,9 +207,11 @@ export async function requestMeetingMedia(options: RequestMeetingMediaOptions = 
     if (videoTrack) {
       camera = 'granted';
       cameraLabel = videoTrack.label || 'Camera';
+      cameraReason = undefined;
     }
   } catch (videoErr) {
     camera = statusForMediaError(videoErr);
+    cameraReason = reasonForMediaError(videoErr);
     cameraLabel = camera === 'unavailable' ? 'No camera found' : 'Camera access blocked';
   }
 
@@ -162,6 +221,8 @@ export async function requestMeetingMedia(options: RequestMeetingMediaOptions = 
     camera,
     micLabel,
     cameraLabel,
+    micReason,
+    cameraReason,
   };
 }
 
