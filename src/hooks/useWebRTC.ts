@@ -363,20 +363,21 @@ export function useWebRTC(meetingId: string, isInMeeting: boolean) {
       pc.onconnectionstatechange = () => {
         logWebRTCEvent('peer', 'connection-state', { state: pc.connectionState }, peerId);
         if (pc.connectionState === 'disconnected' || pc.connectionState === 'failed') {
-          const retry = retryStateRef.current.get(peerId);
-          if (retry?.timer) clearTimeout(retry.timer);
-          retryStateRef.current.delete(peerId);
-          peersRef.current.delete(peerId);
-          makingOfferRef.current.delete(peerId);
-          updateRemoteStreams();
+          schedulePeerRestartRef.current(peerId, `connection-${pc.connectionState}`);
         } else if (pc.connectionState === 'connected') {
           // Verify tracks arrived; if not, kick a retry.
+          const restart = peerRestartStateRef.current.get(peerId);
+          if (restart?.timer) clearTimeout(restart.timer);
+          peerRestartStateRef.current.delete(peerId);
           scheduleTrackRetryRef.current(peerId);
         }
       };
 
       pc.oniceconnectionstatechange = () => {
         logWebRTCEvent('ice', 'state', { state: pc.iceConnectionState }, peerId);
+        if (pc.iceConnectionState === 'disconnected' || pc.iceConnectionState === 'failed') {
+          schedulePeerRestartRef.current(peerId, `ice-${pc.iceConnectionState}`);
+        }
       };
 
       peersRef.current.set(peerId, { pc, peerId });
