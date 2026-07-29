@@ -977,17 +977,36 @@ export function useWebRTC(meetingId: string, isInMeeting: boolean) {
           return;
         }
         mergeRawLocalTracks(preflight);
+        updateLocalMediaStatusFromStream(preflight);
+        if (preflight.getAudioTracks().some((track) => track.readyState === 'live')) setMicOn(true);
+        if (preflight.getVideoTracks().some((track) => track.readyState === 'live')) setCameraOn(true);
         return;
       }
 
       if (mediaAcquireInFlightRef.current) return;
       mediaAcquireInFlightRef.current = true;
       try {
-        const result = await requestMeetingMedia({ preferCombined: true });
+        const selection = selectedDevicesRef.current;
+        const result = await requestMeetingMedia({
+          preferCombined: true,
+          audioDeviceId: selection.audioDeviceId,
+          videoDeviceId: selection.videoDeviceId,
+          facingMode: selection.facingMode,
+        });
         const stream = result.stream;
         if (!stream) {
-          setMicOn(false);
-          setCameraOn(false);
+          const audioCode = reasonCode('audio-initial-failed', result.micReason);
+          const videoCode = reasonCode('video-initial-failed', result.cameraReason);
+          setLocalMediaStatus({
+            audio: isMicOn ? 'retrying' : 'off',
+            video: isCameraOn ? 'retrying' : 'off',
+            audioLabel: result.micLabel,
+            videoLabel: result.cameraLabel,
+            lastErrorCode: `${audioCode}|${videoCode}`,
+            retryAttempt: 0,
+          });
+          if (isMicOn) scheduleLocalMediaRetry('audio', result.micReason ?? 'initial-failed');
+          if (isCameraOn) scheduleLocalMediaRetry('video', result.cameraReason ?? 'initial-failed');
           console.warn('No media devices granted for this meeting');
           return;
         }
@@ -996,10 +1015,19 @@ export function useWebRTC(meetingId: string, isInMeeting: boolean) {
           return;
         }
         mergeRawLocalTracks(stream);
-        setMicOn(result.mic === 'granted');
-        setCameraOn(result.camera === 'granted');
+        updateLocalMediaStatusFromStream(stream, {
+          errorCode: [
+            result.mic !== 'granted' ? reasonCode('audio-initial-failed', result.micReason) : null,
+            result.camera !== 'granted' ? reasonCode('video-initial-failed', result.cameraReason) : null,
+          ].filter(Boolean).join('|') || null,
+        });
+        if (result.mic === 'granted') setMicOn(true);
+        else if (isMicOn) scheduleLocalMediaRetry('audio', result.micReason ?? 'initial-failed');
+        if (result.camera === 'granted') setCameraOn(true);
+        else if (isCameraOn) scheduleLocalMediaRetry('video', result.cameraReason ?? 'initial-failed');
       } catch (err) {
         console.error('No media devices available:', err);
+        logWebRTCEvent('error', 'initial-media-error', { reason: String(err) });
       } finally {
         mediaAcquireInFlightRef.current = false;
       }
@@ -1020,8 +1048,10 @@ export function useWebRTC(meetingId: string, isInMeeting: boolean) {
       screenStreamRef.current?.getTracks().forEach((t) => t.stop());
       screenStreamRef.current = null;
       setScreenStream(null);
+      localMediaRetryTimersRef.current.audio && clearTimeout(localMediaRetryTimersRef.current.audio);
+      localMediaRetryTimersRef.current.video && clearTimeout(localMediaRetryTimersRef.current.video);
     };
-  }, [isInMeeting, mergeRawLocalTracks, setCameraOn, setMicOn]);
+  }, [isCameraOn, isInMeeting, isMicOn, mergeRawLocalTracks, scheduleLocalMediaRetry, setCameraOn, setLocalMediaStatus, setMicOn, updateLocalMediaStatusFromStream]);
 
   // Sync mic/camera toggle to local stream
   useEffect(() => {
@@ -1036,8 +1066,11 @@ export function useWebRTC(meetingId: string, isInMeeting: boolean) {
     if (isMicOn) {
       const hasLiveAudio = rawLocalStreamRef.current?.getAudioTracks().some((t) => t.readyState === 'live') ?? false;
       if (!hasLiveAudio) void acquireMissingLocalMedia(true, false);
+      else setLocalMediaStatus({ audio: 'ok', audioLabel: rawLocalStreamRef.current?.getAudioTracks()[0]?.label || 'Microphone' });
+    } else {
+      setLocalMediaStatus({ audio: 'off', audioLabel: 'Microphone off' });
     }
-  }, [acquireMissingLocalMedia, isMicOn]);
+  }, [acquireMissingLocalMedia, isMicOn, setLocalMediaStatus]);
 
   useEffect(() => {
     const syncVideoState = (stream: MediaStream | null) => {
@@ -1051,8 +1084,11 @@ export function useWebRTC(meetingId: string, isInMeeting: boolean) {
     if (isCameraOn) {
       const hasLiveVideo = rawLocalStreamRef.current?.getVideoTracks().some((t) => t.readyState === 'live') ?? false;
       if (!hasLiveVideo) void acquireMissingLocalMedia(false, true);
+      else setLocalMediaStatus({ video: 'ok', videoLabel: rawLocalStreamRef.current?.getVideoTracks()[0]?.label || 'Camera' });
+    } else {
+      setLocalMediaStatus({ video: 'off', videoLabel: 'Camera off' });
     }
-  }, [acquireMissingLocalMedia, isCameraOn]);
+  }, [acquireMissingLocalMedia, isCameraOn, setLocalMediaStatus]);
 
   // Setup signaling channel
   useEffect(() => {
