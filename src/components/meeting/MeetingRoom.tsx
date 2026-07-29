@@ -14,6 +14,7 @@ import { JoinRequestNotifier } from './JoinRequestNotifier';
 import { PerformanceHud } from './PerformanceHud';
 import { AlignmentDebugOverlay } from './AlignmentDebugOverlay';
 import { MobileSubmenus } from './MobileSubmenus';
+import { MediaDiagnosticsPanel } from './MediaDiagnosticsPanel';
 import { useSwipeGesture } from '@/hooks/useSwipeGesture';
 import { useIsMobile } from '@/hooks/use-mobile';
 import { useWebRTC } from '@/hooks/useWebRTC';
@@ -34,7 +35,7 @@ export function MeetingRoom() {
   const setRightPanel = useMeetingStore((s) => s.setRightPanel);
   const isMobile = useIsMobile();
   const videoAreaRef = useRef<HTMLDivElement>(null);
-  const { localStream, remoteStreams, screenStream, remoteScreenStream, getPeerStats, getPeerDiagnostics } = useWebRTC(meetingId, screen === 'meeting');
+  const { localStream, remoteStreams, screenStream, remoteScreenStream, getPeerStats, getPeerDiagnostics, selectLocalDevices } = useWebRTC(meetingId, screen === 'meeting');
 
   const PANEL_CYCLE: Array<'ai' | 'participants' | 'chat'> = ['ai', 'participants', 'chat'];
   useSwipeGesture(videoAreaRef, {
@@ -157,6 +158,7 @@ export function MeetingRoom() {
       <PipOverlay />
       <JoinRequestNotifier />
       <PerformanceHud getPeerStats={getPeerStats} getPeerDiagnostics={getPeerDiagnostics} />
+      <MediaDiagnosticsPanel onSelectDevices={selectLocalDevices} />
       <AlignmentDebugOverlay />
       <MobileSubmenus />
 
