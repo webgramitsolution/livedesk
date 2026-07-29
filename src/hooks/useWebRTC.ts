@@ -698,23 +698,43 @@ export function useWebRTC(meetingId: string, isInMeeting: boolean) {
       const nextAudioTrack = nextStream.getAudioTracks()[0] ?? null;
       const nextVideoTrack = nextStream.getVideoTracks()[0] ?? null;
       let needsRenegotiation = false;
+      let hasAudioSender = false;
+      let hasVideoSender = false;
 
       senders.forEach((sender) => {
         const transceiver = transceivers.find((t) => t.sender === sender);
         const senderKind = sender.track?.kind ?? transceiver?.receiver.track.kind;
         if (senderKind === 'audio') {
-          void sender.replaceTrack(nextAudioTrack).catch((err) => {
-            logWebRTCEvent('error', 'replace-audio-track-failed', { reason: String(err) }, peer.peerId);
-          });
+          if (nextAudioTrack) {
+            hasAudioSender = true;
+            if (transceiver && transceiver.direction !== 'sendrecv') {
+              transceiver.direction = 'sendrecv';
+              needsRenegotiation = true;
+            }
+          }
+          if (sender.track !== nextAudioTrack) {
+            void sender.replaceTrack(nextAudioTrack).catch((err) => {
+              logWebRTCEvent('error', 'replace-audio-track-failed', { reason: String(err) }, peer.peerId);
+            });
+          }
         }
         if (senderKind === 'video') {
-          void sender.replaceTrack(nextVideoTrack).catch((err) => {
-            logWebRTCEvent('error', 'replace-video-track-failed', { reason: String(err) }, peer.peerId);
-          });
+          if (nextVideoTrack) {
+            hasVideoSender = true;
+            if (transceiver && transceiver.direction !== 'sendrecv') {
+              transceiver.direction = 'sendrecv';
+              needsRenegotiation = true;
+            }
+          }
+          if (sender.track !== nextVideoTrack) {
+            void sender.replaceTrack(nextVideoTrack).catch((err) => {
+              logWebRTCEvent('error', 'replace-video-track-failed', { reason: String(err) }, peer.peerId);
+            });
+          }
         }
       });
 
-      if (nextAudioTrack && !senders.some((sender) => sender.track?.kind === 'audio')) {
+      if (nextAudioTrack && !hasAudioSender) {
         const recvOnlyAudio = transceivers.find((transceiver) =>
           transceiver.receiver.track.kind === 'audio' && !transceiver.sender.track
         );
@@ -727,7 +747,7 @@ export function useWebRTC(meetingId: string, isInMeeting: boolean) {
         needsRenegotiation = true;
       }
 
-      if (nextVideoTrack && !senders.some((sender) => sender.track?.kind === 'video')) {
+      if (nextVideoTrack && !hasVideoSender) {
         const recvOnlyVideo = transceivers.find((transceiver) =>
           transceiver.receiver.track.kind === 'video' && !transceiver.sender.track
         );
