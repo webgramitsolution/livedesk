@@ -429,9 +429,10 @@ export function useWebRTC(meetingId: string, isInMeeting: boolean) {
       const peer = peersRef.current.get(from);
       if (peer) {
         await peer.pc.setRemoteDescription(new RTCSessionDescription(answer));
+        setLastRenegotiationAt();
       }
     },
-    []
+    [setLastRenegotiationAt]
   );
 
   const handleIceCandidate = useCallback(
