@@ -806,28 +806,137 @@ export function useWebRTC(meetingId: string, isInMeeting: boolean) {
     applyProcessedLocalStream(current);
   }, [applyProcessedLocalStream, wireLocalTrackDiagnostics]);
 
-  const acquireMissingLocalMedia = useCallback(async (needsAudio: boolean, needsVideo: boolean) => {
-    if (!isInMeeting || mediaAcquireInFlightRef.current || (!needsAudio && !needsVideo)) return;
+  const clearLocalRetryTimer = useCallback((kind: MediaKind) => {
+    const timer = localMediaRetryTimersRef.current[kind];
+    if (timer) clearTimeout(timer);
+    localMediaRetryTimersRef.current[kind] = null;
+    localMediaRetryAttemptsRef.current[kind] = 0;
+  }, []);
+
+  const scheduleLocalMediaRetry = useCallback((kind: MediaKind, reason: string, selection?: LocalDeviceSelection) => {
+    if (!isInMeeting) return;
+    const attempt = localMediaRetryAttemptsRef.current[kind] + 1;
+    if (attempt > LOCAL_MEDIA_MAX_RETRIES) {
+      const code = reasonCode(`${kind}-retry-give-up`, reason);
+      logWebRTCEvent('media', 'local-retry-give-up', { kind, reason, attempts: attempt - 1, code });
+      setLocalMediaStatus({
+        [kind]: 'blocked',
+        [`${kind}Label`]: `${kind === 'audio' ? 'Microphone' : 'Camera'} needs device selection`,
+        lastErrorCode: code,
+        retryAttempt: attempt - 1,
+      } as Partial<LocalMediaStatus>);
+      return;
+    }
+
+    const delay = backoffDelay(attempt);
+    const existing = localMediaRetryTimersRef.current[kind];
+    if (existing) clearTimeout(existing);
+    localMediaRetryAttemptsRef.current[kind] = attempt;
+    logWebRTCEvent('media', 'local-retry-scheduled', { kind, reason, attempt, delay });
+    setLocalMediaStatus({
+      [kind]: 'retrying',
+      [`${kind}Label`]: `${kind === 'audio' ? 'Microphone' : 'Camera'} retrying…`,
+      lastErrorCode: reasonCode(`${kind}-retry`, reason),
+      retryAttempt: attempt,
+    } as Partial<LocalMediaStatus>);
+
+    localMediaRetryTimersRef.current[kind] = setTimeout(() => {
+      acquireMissingLocalMediaRef.current(kind === 'audio', kind === 'video', selection, `retry-${reason}`);
+    }, delay);
+  }, [isInMeeting, setLocalMediaStatus]);
+
+  const acquireMissingLocalMedia = useCallback(async (
+    needsAudio: boolean,
+    needsVideo: boolean,
+    selection: LocalDeviceSelection = selectedDevicesRef.current,
+    requestReason = 'missing-track',
+  ) => {
+    if (!isInMeeting || (!needsAudio && !needsVideo)) return;
+    if (mediaAcquireInFlightRef.current) {
+      logWebRTCEvent('media', 'local-acquire-skipped-inflight', { needsAudio, needsVideo, requestReason });
+      return;
+    }
 
     mediaAcquireInFlightRef.current = true;
     try {
-      const result = await requestMeetingMedia({ audio: needsAudio, video: needsVideo, preferCombined: false });
+      const audioDeviceId = selection.audioDeviceId ?? selectedDevicesRef.current.audioDeviceId;
+      const videoDeviceId = selection.videoDeviceId ?? selectedDevicesRef.current.videoDeviceId;
+      const facingMode = selection.facingMode ?? selectedDevicesRef.current.facingMode ?? 'user';
+      selectedDevicesRef.current = { audioDeviceId, videoDeviceId, facingMode };
+
+      if (selection.audioDeviceId) setSelectedAudioInput(selection.audioDeviceId);
+      if (selection.videoDeviceId) setSelectedVideoInput(selection.videoDeviceId);
+
+      logWebRTCEvent('media', 'local-acquire-start', { needsAudio, needsVideo, requestReason, audioDeviceId, videoDeviceId, facingMode });
+      const result = await requestMeetingMedia({
+        audio: needsAudio,
+        video: needsVideo,
+        preferCombined: needsAudio && needsVideo,
+        audioDeviceId,
+        videoDeviceId,
+        facingMode,
+      });
       if (result.stream) {
-        mergeRawLocalTracks(result.stream);
+        const replaceKinds: MediaKind[] = [];
+        if (needsAudio && (selection.audioDeviceId || requestReason === 'device-selected')) replaceKinds.push('audio');
+        if (needsVideo && (selection.videoDeviceId || selection.facingMode || requestReason === 'device-selected')) replaceKinds.push('video');
+        mergeRawLocalTracks(result.stream, replaceKinds);
       }
 
-      if (needsAudio) setMicOn(result.mic === 'granted');
-      if (needsVideo) setCameraOn(result.camera === 'granted');
+      if (needsAudio && result.mic === 'granted') {
+        clearLocalRetryTimer('audio');
+        setMicOn(true);
+      }
+      if (needsVideo && result.camera === 'granted') {
+        clearLocalRetryTimer('video');
+        setCameraOn(true);
+      }
 
-      if ((needsAudio && result.mic === 'granted') || (needsVideo && result.camera === 'granted')) {
+      const audioOk = !needsAudio || result.mic === 'granted';
+      const videoOk = !needsVideo || result.camera === 'granted';
+      const lastErrorCode = [
+        needsAudio && result.mic !== 'granted' ? reasonCode('audio-acquire-failed', result.micReason) : null,
+        needsVideo && result.camera !== 'granted' ? reasonCode('video-acquire-failed', result.cameraReason) : null,
+      ].filter(Boolean).join('|') || null;
+
+      setLocalMediaStatus({
+        audio: needsAudio ? (result.mic === 'granted' ? 'ok' : 'retrying') : undefined,
+        video: needsVideo ? (result.camera === 'granted' ? 'ok' : 'retrying') : undefined,
+        audioLabel: needsAudio ? result.micLabel : undefined,
+        videoLabel: needsVideo ? result.cameraLabel : undefined,
+        lastErrorCode,
+      });
+
+      logWebRTCEvent('media', 'local-acquire-result', {
+        mic: result.mic,
+        camera: result.camera,
+        micReason: result.micReason,
+        cameraReason: result.cameraReason,
+        lastErrorCode,
+      });
+
+      if (audioOk && videoOk) {
         toast.success('Camera/microphone connected');
       } else {
-        toast.error('Camera/microphone permission is still blocked');
+        if (needsAudio && result.mic !== 'granted') scheduleLocalMediaRetry('audio', result.micReason ?? 'unknown-error', { audioDeviceId, facingMode });
+        if (needsVideo && result.camera !== 'granted') scheduleLocalMediaRetry('video', result.cameraReason ?? 'unknown-error', { videoDeviceId, facingMode });
+        toast.error('Device connection failed — retrying automatically');
       }
     } finally {
       mediaAcquireInFlightRef.current = false;
     }
-  }, [isInMeeting, mergeRawLocalTracks, setCameraOn, setMicOn]);
+  }, [clearLocalRetryTimer, isInMeeting, mergeRawLocalTracks, scheduleLocalMediaRetry, setCameraOn, setLocalMediaStatus, setMicOn, setSelectedAudioInput, setSelectedVideoInput]);
+
+  useEffect(() => {
+    acquireMissingLocalMediaRef.current = (needsAudio, needsVideo, selection, reason) => {
+      void acquireMissingLocalMedia(needsAudio, needsVideo, selection, reason);
+    };
+  }, [acquireMissingLocalMedia]);
+
+  const selectLocalDevices = useCallback((selection: LocalDeviceSelection) => {
+    selectedDevicesRef.current = { ...selectedDevicesRef.current, ...selection };
+    void acquireMissingLocalMedia(!!selection.audioDeviceId, !!selection.videoDeviceId || !!selection.facingMode, selection, 'device-selected');
+  }, [acquireMissingLocalMedia]);
 
   useEffect(() => {
     const rawStream = rawLocalStreamRef.current;
