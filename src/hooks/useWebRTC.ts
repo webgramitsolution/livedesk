@@ -1272,12 +1272,14 @@ export function useWebRTC(meetingId: string, isInMeeting: boolean) {
           logWebRTCEvent('signal', 'recv-leave', undefined, payload.peerId);
           const peer = peersRef.current.get(payload.peerId);
           if (peer) {
+            const leavingPeerId = String(payload.peerId);
+            const leavingScreenStream = remoteScreenByPeerRef.current.get(leavingPeerId) ?? null;
             peer.pc.close();
-            peersRef.current.delete(payload.peerId);
-            remoteScreenByPeerRef.current.delete(payload.peerId);
+            peersRef.current.delete(leavingPeerId);
+            remoteScreenByPeerRef.current.delete(leavingPeerId);
             updateRemoteStreams();
-            setRemoteScreenPeerId((current) => (current === payload.peerId ? null : current));
-            setRemoteScreenStream((current) => (remoteScreenPeerId === payload.peerId ? null : current));
+            setRemoteScreenPeerId((current) => (current === leavingPeerId ? null : current));
+            setRemoteScreenStream((current) => (current === leavingScreenStream ? null : current));
           }
         })
         .subscribe((status) => {
