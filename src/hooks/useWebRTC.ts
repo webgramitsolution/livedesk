@@ -4,7 +4,7 @@ import { useMeetingStore } from '@/store/meetingStore';
 import { createNoiseCancelledStream } from '@/lib/audio/noiseCancellation';
 import { toast } from 'sonner';
 import { logWebRTCEvent } from '@/lib/webrtcLogger';
-import { requestMeetingMedia, takePreflightStream } from '@/lib/mediaPreflight';
+import { requestMeetingMedia, takePreflightStream, type MediaErrorReason } from '@/lib/mediaPreflight';
 
 const ICE_SERVERS: RTCConfiguration = {
   iceServers: [
@@ -46,6 +46,14 @@ export interface PeerDiagnostic {
   retries: number;
 }
 
+export interface LocalDeviceSelection {
+  audioDeviceId?: string;
+  videoDeviceId?: string;
+  facingMode?: 'user' | 'environment';
+}
+
+type MediaKind = 'audio' | 'video';
+
 export function useWebRTC(meetingId: string, isInMeeting: boolean) {
   const localStreamRef = useRef<MediaStream | null>(null);
   const rawLocalStreamRef = useRef<MediaStream | null>(null);
@@ -56,12 +64,41 @@ export function useWebRTC(meetingId: string, isInMeeting: boolean) {
   const mediaAcquireInFlightRef = useRef(false);
   const makingOfferRef = useRef<Map<string, boolean>>(new Map());
   const retryStateRef = useRef<Map<string, { count: number; timer: ReturnType<typeof setTimeout> | null }>>(new Map());
+  const peerRestartStateRef = useRef<Map<string, { count: number; timer: ReturnType<typeof setTimeout> | null }>>(new Map());
+  const localMediaRetryTimersRef = useRef<{ audio: ReturnType<typeof setTimeout> | null; video: ReturnType<typeof setTimeout> | null }>({ audio: null, video: null });
+  const localMediaRetryAttemptsRef = useRef<{ audio: number; video: number }>({ audio: 0, video: 0 });
+  const selectedDevicesRef = useRef<LocalDeviceSelection>({ facingMode: 'user' });
+  const acquireMissingLocalMediaRef = useRef<(needsAudio: boolean, needsVideo: boolean, selection?: LocalDeviceSelection, reason?: string) => void>(() => {});
   const myPeerIdRef = useRef<string>(crypto.randomUUID());
   const [localStream, setLocalStream] = useState<MediaStream | null>(null);
   const [screenStream, setScreenStream] = useState<MediaStream | null>(null);
   const [remoteStreams, setRemoteStreams] = useState<Map<string, MediaStream>>(new Map());
   const [remoteScreenStream, setRemoteScreenStream] = useState<MediaStream | null>(null);
-  const { isMicOn, isCameraOn, isScreenSharing, toggleScreenShare, isNoiseCancellationOn, meetingSessionId, setSelfCapture, setMicOn, setCameraOn } = useMeetingStore();
+  const {
+    isMicOn,
+    isCameraOn,
+    isScreenSharing,
+    toggleScreenShare,
+    isNoiseCancellationOn,
+    meetingSessionId,
+    selectedAudioInput,
+    selectedVideoInput,
+    setSelfCapture,
+    setMicOn,
+    setCameraOn,
+    setSelectedAudioInput,
+    setSelectedVideoInput,
+    setLocalMediaStatus,
+    setLastRenegotiationAt,
+  } = useMeetingStore();
+
+  useEffect(() => {
+    selectedDevicesRef.current = {
+      audioDeviceId: selectedAudioInput,
+      videoDeviceId: selectedVideoInput,
+      facingMode: selectedDevicesRef.current.facingMode ?? 'user',
+    };
+  }, [selectedAudioInput, selectedVideoInput]);
 
   const ensurePresenceReady = useCallback(async () => {
     if (!meetingId || !meetingSessionId) return false;
