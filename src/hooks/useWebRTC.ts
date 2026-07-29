@@ -254,6 +254,72 @@ export function useWebRTC(meetingId: string, isInMeeting: boolean) {
     return list;
   }, []);
 
+  const getDiagnosticsSnapshot = useCallback(async () => {
+    const peers = await Promise.all(Array.from(peersRef.current.entries()).map(async ([peerId, peer]) => {
+      const stats: Array<Record<string, unknown>> = [];
+      try {
+        const reports = await peer.pc.getStats();
+        reports.forEach((report) => {
+          stats.push({ ...(report.toJSON?.() ?? report), id: report.id, type: report.type, timestamp: report.timestamp });
+        });
+      } catch (error) {
+        stats.push({ type: 'stats-error', error: String(error) });
+      }
+
+      const inbound = stats.filter((report) => report.type === 'inbound-rtp');
+      const outbound = stats.filter((report) => report.type === 'outbound-rtp');
+
+      return {
+        peerId,
+        connectionState: peer.pc.connectionState,
+        iceConnectionState: peer.pc.iceConnectionState,
+        signalingState: peer.pc.signalingState,
+        lastRenegotiationReason: lastRenegotiationReasonRef.current.get(peerId) ?? null,
+        routing: {
+          faceTracks: remoteStreams.get(peerId)?.getTracks().map((track) => ({ id: track.id, kind: track.kind, label: track.label, readyState: track.readyState })) ?? [],
+          screenTracks: remoteScreenByPeerRef.current.get(peerId)?.getTracks().map((track) => ({ id: track.id, kind: track.kind, label: track.label, readyState: track.readyState })) ?? [],
+          validation: {
+            hasInboundAudio: inbound.some((report) => report.kind === 'audio' || report.mediaType === 'audio'),
+            hasInboundVideo: inbound.some((report) => report.kind === 'video' || report.mediaType === 'video'),
+            hasOutboundAudio: outbound.some((report) => report.kind === 'audio' || report.mediaType === 'audio'),
+            hasOutboundVideo: outbound.some((report) => report.kind === 'video' || report.mediaType === 'video'),
+          },
+        },
+        transceivers: peer.pc.getTransceivers().map((transceiver, index) => ({
+          index,
+          mid: transceiver.mid,
+          direction: transceiver.direction,
+          currentDirection: transceiver.currentDirection,
+          sender: {
+            kind: transceiver.sender.track?.kind ?? transceiver.receiver.track.kind,
+            trackId: transceiver.sender.track?.id ?? null,
+            label: transceiver.sender.track?.label ?? null,
+            readyState: transceiver.sender.track?.readyState ?? null,
+          },
+          receiver: {
+            kind: transceiver.receiver.track?.kind ?? null,
+            trackId: transceiver.receiver.track?.id ?? null,
+            label: transceiver.receiver.track?.label ?? null,
+            muted: transceiver.receiver.track?.muted ?? null,
+            readyState: transceiver.receiver.track?.readyState ?? null,
+          },
+        })),
+        stats,
+      };
+    }));
+
+    return {
+      meetingId,
+      localPeerId: myPeerIdRef.current,
+      localMedia: {
+        audio: localStreamRef.current?.getAudioTracks().map((track) => ({ id: track.id, label: track.label, enabled: track.enabled, readyState: track.readyState })) ?? [],
+        video: localStreamRef.current?.getVideoTracks().map((track) => ({ id: track.id, label: track.label, enabled: track.enabled, readyState: track.readyState })) ?? [],
+        screen: screenStreamRef.current?.getTracks().map((track) => ({ id: track.id, kind: track.kind, label: track.label, enabled: track.enabled, readyState: track.readyState })) ?? [],
+      },
+      peers,
+    };
+  }, [meetingId, remoteStreams]);
+
   const isLikelyScreenTrack = useCallback((track: MediaStreamTrack | null | undefined) => {
     if (!track || track.kind !== 'video') return false;
     const settings = typeof track.getSettings === 'function' ? track.getSettings() : {};
@@ -265,10 +331,11 @@ export function useWebRTC(meetingId: string, isInMeeting: boolean) {
     const streams = new Map<string, MediaStream>();
     peersRef.current.forEach((peer, id) => {
       const receivers = peer.pc.getReceivers();
+      const screenTrackIds = new Set(remoteScreenByPeerRef.current.get(id)?.getTracks().map((track) => track.id) ?? []);
       if (receivers.length > 0) {
         const stream = new MediaStream();
         receivers.forEach((r) => {
-          if (r.track && !isLikelyScreenTrack(r.track)) stream.addTrack(r.track);
+          if (r.track && !screenTrackIds.has(r.track.id) && !isLikelyScreenTrack(r.track)) stream.addTrack(r.track);
         });
         if (stream.getTracks().length > 0) {
           streams.set(id, stream);
@@ -348,14 +415,21 @@ export function useWebRTC(meetingId: string, isInMeeting: boolean) {
           .filter((receiver) => receiver.track?.kind === 'video').length;
 
         if (incomingStream && (videoReceiverCount > 1 || isLikelyScreenTrack(track))) {
+          remoteScreenByPeerRef.current.set(peerId, incomingStream);
+          setRemoteScreenPeerId(peerId);
           setRemoteScreenStream(incomingStream);
-          track.addEventListener('ended', () => setRemoteScreenStream((current) => (current === incomingStream ? null : current)));
+          track.addEventListener('ended', () => {
+            remoteScreenByPeerRef.current.delete(peerId);
+            setRemoteScreenPeerId((current) => (current === peerId ? null : current));
+            setRemoteScreenStream((current) => (current === incomingStream ? null : current));
+          });
         }
         track.addEventListener('mute', () =>
           logWebRTCEvent('track', 'remote-track-muted', { kind: track.kind }, peerId),
         );
         track.addEventListener('unmute', () => {
           logWebRTCEvent('track', 'remote-track-unmuted', { kind: track.kind }, peerId);
+          if (track.kind === 'audio') void recoverRemoteAudioPlayback('remote-track-unmuted');
           updateRemoteStreams();
         });
         track.addEventListener('ended', () => {
@@ -363,6 +437,7 @@ export function useWebRTC(meetingId: string, isInMeeting: boolean) {
           updateRemoteStreams();
         });
         updateRemoteStreams();
+        if (track.kind === 'audio') void recoverRemoteAudioPlayback('remote-track-attached');
       };
 
       pc.onconnectionstatechange = () => {
@@ -455,10 +530,11 @@ export function useWebRTC(meetingId: string, isInMeeting: boolean) {
   );
 
   const sendOfferToPeer = useCallback(
-    async (peerId: string) => {
+    async (peerId: string, reason = 'manual') => {
       const pc = createPeerConnection(peerId);
 
       if (pc.signalingState !== 'stable') {
+        logWebRTCEvent('retry', 'renegotiation-skipped-unstable', { reason, state: pc.signalingState }, peerId);
         return;
       }
 
@@ -472,8 +548,9 @@ export function useWebRTC(meetingId: string, isInMeeting: boolean) {
 
         await pc.setLocalDescription(offer);
         setLastRenegotiationAt();
+        lastRenegotiationReasonRef.current.set(peerId, reason);
 
-        logWebRTCEvent('signal', 'send-offer', undefined, peerId);
+        logWebRTCEvent('signal', 'send-offer', { reason }, peerId);
         channelRef.current?.send({
           type: 'broadcast',
           event: 'offer',
