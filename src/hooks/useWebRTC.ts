@@ -1108,6 +1108,21 @@ export function useWebRTC(meetingId: string, isInMeeting: boolean) {
       logWebRTCEvent('signal', 'send-join');
     };
 
+    const rerunRenegotiation = (reason: string) => {
+      logWebRTCEvent('retry', 'renegotiation-circuit-run', { reason, peers: peersRef.current.size });
+      sendJoinAnnouncement();
+      peersRef.current.forEach((peer) => {
+        schedulePeerRestartRef.current(peer.peerId, reason);
+      });
+    };
+
+    const onOnline = () => rerunRenegotiation('browser-online');
+    const onVisibility = () => {
+      if (document.visibilityState === 'visible') rerunRenegotiation('tab-visible');
+    };
+    window.addEventListener('online', onOnline);
+    document.addEventListener('visibilitychange', onVisibility);
+
     void (async () => {
       const ready = await ensurePresenceReady();
       if (!ready || cancelled) return;
@@ -1157,6 +1172,8 @@ export function useWebRTC(meetingId: string, isInMeeting: boolean) {
           if (status === 'SUBSCRIBED') {
             sendJoinAnnouncement();
             joinTimers = [700, 1500, 3000].map((delay) => setTimeout(sendJoinAnnouncement, delay));
+          } else if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT' || status === 'CLOSED') {
+            setTimeout(() => rerunRenegotiation(`channel-${status.toLowerCase()}`), 1000);
           }
         });
     })();
@@ -1164,6 +1181,8 @@ export function useWebRTC(meetingId: string, isInMeeting: boolean) {
     return () => {
       cancelled = true;
       joinTimers.forEach((timer) => clearTimeout(timer));
+      window.removeEventListener('online', onOnline);
+      document.removeEventListener('visibilitychange', onVisibility);
 
       channel?.send({
         type: 'broadcast',
@@ -1174,6 +1193,10 @@ export function useWebRTC(meetingId: string, isInMeeting: boolean) {
       peersRef.current.forEach((peer) => peer.pc.close());
       peersRef.current.clear();
       makingOfferRef.current.clear();
+      retryStateRef.current.forEach((retry) => retry.timer && clearTimeout(retry.timer));
+      retryStateRef.current.clear();
+      peerRestartStateRef.current.forEach((restart) => restart.timer && clearTimeout(restart.timer));
+      peerRestartStateRef.current.clear();
       setRemoteStreams(new Map());
       setRemoteScreenStream(null);
 
@@ -1190,5 +1213,6 @@ export function useWebRTC(meetingId: string, isInMeeting: boolean) {
     myPeerId: myPeerIdRef.current,
     getPeerStats,
     getPeerDiagnostics,
+    selectLocalDevices,
   };
 }
