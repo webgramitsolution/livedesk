@@ -1,15 +1,16 @@
 import { useEffect, useState } from 'react';
 import { Activity, Download, ChevronDown, ChevronUp, Volume2, VolumeX, Wifi, WifiOff } from 'lucide-react';
 import { useMeetingStore } from '@/store/meetingStore';
-import { downloadWebRTCLog } from '@/lib/webrtcLogger';
+import { downloadWebRTCDiagnostics } from '@/lib/webrtcLogger';
 import type { PeerDiagnostic } from '@/hooks/useWebRTC';
 
 interface Props {
   getPeerStats?: () => Promise<{ fps: number; packetLossPct: number; rtt: number; peers: number }>;
   getPeerDiagnostics?: () => PeerDiagnostic[];
+  getDiagnosticsSnapshot?: () => Promise<unknown> | unknown;
 }
 
-export function PerformanceHud({ getPeerStats, getPeerDiagnostics }: Props) {
+export function PerformanceHud({ getPeerStats, getPeerDiagnostics, getDiagnosticsSnapshot }: Props) {
   const showPerfHud = useMeetingStore((s) => s.showPerfHud);
   const aiLatencyMs = useMeetingStore((s) => s.aiLatencyMs);
   const meetingId = useMeetingStore((s) => s.meetingId);
@@ -79,7 +80,7 @@ export function PerformanceHud({ getPeerStats, getPeerDiagnostics }: Props) {
         </button>
         <button
           type="button"
-          onClick={() => downloadWebRTCLog(meetingId || 'session')}
+          onClick={() => void downloadWebRTCDiagnostics(meetingId || 'session', getDiagnosticsSnapshot)}
           className="inline-flex h-5 items-center gap-1 rounded-full border border-border px-2 hover:bg-muted"
           aria-label="Download signaling log"
         >
@@ -136,7 +137,7 @@ export function PerformanceHud({ getPeerStats, getPeerDiagnostics }: Props) {
             </ul>
           )}
           <p className="mt-2 px-1 text-muted-foreground">
-            Signaling log is captured in-memory. Click "Log" to download JSON.
+            Diagnostics include signaling, stats, routing, and transceiver mapping.
           </p>
         </div>
       )}

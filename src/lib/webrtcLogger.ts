@@ -74,25 +74,39 @@ export function subscribeWebRTCLog(fn: (entries: WebRTCLogEntry[]) => void) {
 
 export function downloadWebRTCLog(filenameHint = 'meeting') {
   const payload = buildWebRTCLogPayload();
+  downloadJsonPayload(payload, `webrtc-log-${filenameHint}-${Date.now()}.json`);
+}
+
+function downloadJsonPayload(payload: unknown, filename: string) {
   const blob = new Blob([JSON.stringify(payload, null, 2)], {
     type: 'application/json',
   });
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url;
-  a.download = `webrtc-log-${filenameHint}-${Date.now()}.json`;
+  a.download = filename;
   document.body.appendChild(a);
   a.click();
   a.remove();
   setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
-export function buildWebRTCLogPayload() {
+export function buildWebRTCLogPayload(diagnostics?: unknown) {
   return {
     exportedAt: new Date().toISOString(),
     userAgent: typeof navigator !== 'undefined' ? navigator.userAgent : 'unknown',
+    diagnostics: diagnostics ?? null,
     entries: buffer,
   };
+}
+
+export async function downloadWebRTCDiagnostics(
+  filenameHint = 'meeting',
+  collectDiagnostics?: () => Promise<unknown> | unknown,
+) {
+  const diagnostics = collectDiagnostics ? await collectDiagnostics() : null;
+  const payload = buildWebRTCLogPayload(diagnostics);
+  downloadJsonPayload(payload, `webrtc-diagnostics-${filenameHint}-${Date.now()}.json`);
 }
 
 export async function shareWebRTCLog(filenameHint = 'meeting') {
@@ -116,4 +130,31 @@ export async function shareWebRTCLog(filenameHint = 'meeting') {
   }
 
   downloadWebRTCLog(filenameHint);
+}
+
+export async function shareWebRTCDiagnostics(
+  filenameHint = 'meeting',
+  collectDiagnostics?: () => Promise<unknown> | unknown,
+) {
+  const diagnostics = collectDiagnostics ? await collectDiagnostics() : null;
+  const payload = buildWebRTCLogPayload(diagnostics);
+  const blob = new Blob([JSON.stringify(payload, null, 2)], {
+    type: 'application/json',
+  });
+  const file = new File([blob], `webrtc-diagnostics-${filenameHint}-${Date.now()}.json`, { type: 'application/json' });
+  const nav = navigator as Navigator & {
+    canShare?: (data: ShareData & { files?: File[] }) => boolean;
+    share?: (data: ShareData & { files?: File[] }) => Promise<void>;
+  };
+
+  if (nav.share && (!nav.canShare || nav.canShare({ files: [file] }))) {
+    await nav.share({
+      title: 'WebRTC diagnostics export',
+      text: 'WebRTC stats, transceiver mapping, routing validation, and event history',
+      files: [file],
+    });
+    return;
+  }
+
+  await downloadWebRTCDiagnostics(filenameHint, () => diagnostics);
 }

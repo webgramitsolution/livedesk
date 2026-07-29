@@ -75,12 +75,13 @@ interface UseRemoteControlOptions {
   meetingId: string;
   isInMeeting: boolean;
   isLocalPresenter: boolean; // true when we are sharing a screen
+  presenterHintId?: string | null;
   onExecuteInput?: (event: RCInputEvent, fromName: string) => void;
   tuning?: RCTuning;
 }
 
 export function useRemoteControl(options: UseRemoteControlOptions) {
-  const { meetingId, isInMeeting, isLocalPresenter, onExecuteInput } = options;
+  const { meetingId, isInMeeting, isLocalPresenter, presenterHintId, onExecuteInput } = options;
   const sessionId = useMeetingStore((s) => s.meetingSessionId);
   const userName = useMeetingStore((s) => s.userName) || 'You';
 
@@ -143,6 +144,13 @@ export function useRemoteControl(options: UseRemoteControlOptions) {
   useEffect(() => {
     remotePresenterIdRef.current = remotePresenterId;
   }, [remotePresenterId]);
+
+  useEffect(() => {
+    if (isLocalPresenter || !presenterHintId) return;
+    setRemotePresenterId((current) => current ?? presenterHintId);
+    setRemotePresenterName((current) => (current === 'Presenter' ? 'Screen presenter' : current));
+    knownPeersRef.current.add(presenterHintId);
+  }, [isLocalPresenter, presenterHintId]);
   const grantLatencySamples = useRef<number[]>([]);
   const requestQueueRef = useRef<IncomingRequest[]>([]);
   useEffect(() => {
