@@ -535,6 +535,49 @@ export function useWebRTC(meetingId: string, isInMeeting: boolean) {
     scheduleTrackRetryRef.current = scheduleTrackRetry;
   }, [scheduleTrackRetry]);
 
+  const schedulePeerRestart = useCallback((peerId: string, reason: string) => {
+    const existing = peerRestartStateRef.current.get(peerId);
+    if (existing?.timer) clearTimeout(existing.timer);
+
+    const state = existing ?? { count: 0, timer: null };
+    if (state.count >= PEER_RESTART_MAX_RETRIES) {
+      logWebRTCEvent('retry', 'peer-restart-give-up', { reason, attempts: state.count }, peerId);
+      return;
+    }
+
+    state.count += 1;
+    const delay = backoffDelay(state.count, 800, 8000);
+    logWebRTCEvent('retry', 'peer-restart-scheduled', { reason, attempt: state.count, delay }, peerId);
+
+    state.timer = setTimeout(() => {
+      const current = peersRef.current.get(peerId);
+      logWebRTCEvent('retry', 'peer-restart-run', { reason, attempt: state.count }, peerId);
+
+      if (current) {
+        try {
+          current.pc.getSenders().forEach((sender) => {
+            try { current.pc.removeTrack(sender); } catch { /* sender may already be detached */ }
+          });
+          current.pc.close();
+        } catch {
+          /* ignore closed peer */
+        }
+      }
+
+      peersRef.current.delete(peerId);
+      retryStateRef.current.delete(peerId);
+      makingOfferRef.current.delete(peerId);
+      updateRemoteStreams();
+      void sendOfferToPeer(peerId);
+    }, delay);
+
+    peerRestartStateRef.current.set(peerId, state);
+  }, [sendOfferToPeer, updateRemoteStreams]);
+
+  useEffect(() => {
+    schedulePeerRestartRef.current = schedulePeerRestart;
+  }, [schedulePeerRestart]);
+
   // Start screen sharing
   const startScreenShare = useCallback(async () => {
     try {
