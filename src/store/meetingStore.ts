@@ -46,6 +46,17 @@ export interface BreakoutRoom {
 type LatencyStatus = 'good' | 'medium' | 'poor';
 type AppScreen = 'lobby' | 'connecting' | 'meeting' | 'waiting';
 type RightPanel = 'ai' | 'participants' | 'chat' | null;
+export type LocalMediaHealth = 'ok' | 'off' | 'missing' | 'retrying' | 'blocked';
+
+export interface LocalMediaStatus {
+  audio: LocalMediaHealth;
+  video: LocalMediaHealth;
+  audioLabel: string;
+  videoLabel: string;
+  lastErrorCode: string | null;
+  retryAttempt: number;
+  lastRenegotiationAt: number | null;
+}
 
 interface MeetingState {
   screen: AppScreen;
@@ -81,6 +92,7 @@ interface MeetingState {
   showPerfHud: boolean;
   pendingJoinRequestId: string | null;
   aiLatencyMs: number;
+  localMediaStatus: LocalMediaStatus;
 
   // Settings state
   selectedLanguage: string;
@@ -125,6 +137,8 @@ interface MeetingState {
   togglePerfHud: () => void;
   setPendingJoinRequestId: (id: string | null) => void;
   setAiLatencyMs: (ms: number) => void;
+  setLocalMediaStatus: (status: Partial<LocalMediaStatus>) => void;
+  setLastRenegotiationAt: (timestamp?: number) => void;
   setBreakoutRooms: (rooms: BreakoutRoom[]) => void;
   startBreakoutSession: () => void;
   endBreakoutSession: () => void;
@@ -137,6 +151,16 @@ interface MeetingState {
 const INITIAL_PARTICIPANTS: Participant[] = [
   { id: '1', name: 'You', isMuted: false, isCameraOn: true, isSpeaking: false, hasMouseControl: false, mouseControlRequested: false, handRaised: false, handRaisedAt: null, avatar: 'Y', spokenLanguage: 'en' },
 ];
+
+const INITIAL_LOCAL_MEDIA_STATUS: LocalMediaStatus = {
+  audio: 'missing',
+  video: 'missing',
+  audioLabel: 'Microphone not connected',
+  videoLabel: 'Camera not connected',
+  lastErrorCode: null,
+  retryAttempt: 0,
+  lastRenegotiationAt: null,
+};
 
 const createLocalParticipant = (name: string): Participant => ({
   id: '1',
@@ -261,6 +285,7 @@ export const useMeetingStore = create<MeetingState>((set) => ({
   showPerfHud: persistedMeetingState?.showPerfHud ?? false,
   pendingJoinRequestId: null,
   aiLatencyMs: 0,
+  localMediaStatus: INITIAL_LOCAL_MEDIA_STATUS,
   selectedLanguage: persistedMeetingState?.selectedLanguage ?? 'en',
   selectedAudioInput: persistedMeetingState?.selectedAudioInput ?? 'default',
   selectedAudioOutput: persistedMeetingState?.selectedAudioOutput ?? 'default',
@@ -353,6 +378,9 @@ export const useMeetingStore = create<MeetingState>((set) => ({
   togglePerfHud: () => set((s) => ({ showPerfHud: !s.showPerfHud })),
   setPendingJoinRequestId: (pendingJoinRequestId) => set({ pendingJoinRequestId }),
   setAiLatencyMs: (aiLatencyMs) => set({ aiLatencyMs }),
+  setLocalMediaStatus: (status) => set((s) => ({ localMediaStatus: { ...s.localMediaStatus, ...status } })),
+  setLastRenegotiationAt: (timestamp) =>
+    set((s) => ({ localMediaStatus: { ...s.localMediaStatus, lastRenegotiationAt: timestamp ?? Date.now() } })),
   setBreakoutRooms: (breakoutRooms) => set({ breakoutRooms }),
   startBreakoutSession: () => set({ breakoutActive: true, showBreakoutRooms: false }),
   endBreakoutSession: () => set({ breakoutActive: false, breakoutRooms: [], showBreakoutRooms: false }),

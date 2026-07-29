@@ -8,6 +8,7 @@ export type WebRTCLogCategory =
   | 'track'
   | 'ice'
   | 'presence'
+  | 'media'
   | 'retry'
   | 'error';
 
@@ -72,11 +73,7 @@ export function subscribeWebRTCLog(fn: (entries: WebRTCLogEntry[]) => void) {
 }
 
 export function downloadWebRTCLog(filenameHint = 'meeting') {
-  const payload = {
-    exportedAt: new Date().toISOString(),
-    userAgent: typeof navigator !== 'undefined' ? navigator.userAgent : 'unknown',
-    entries: buffer,
-  };
+  const payload = buildWebRTCLogPayload();
   const blob = new Blob([JSON.stringify(payload, null, 2)], {
     type: 'application/json',
   });
@@ -88,4 +85,35 @@ export function downloadWebRTCLog(filenameHint = 'meeting') {
   a.click();
   a.remove();
   setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+export function buildWebRTCLogPayload() {
+  return {
+    exportedAt: new Date().toISOString(),
+    userAgent: typeof navigator !== 'undefined' ? navigator.userAgent : 'unknown',
+    entries: buffer,
+  };
+}
+
+export async function shareWebRTCLog(filenameHint = 'meeting') {
+  const payload = buildWebRTCLogPayload();
+  const blob = new Blob([JSON.stringify(payload, null, 2)], {
+    type: 'application/json',
+  });
+  const file = new File([blob], `webrtc-log-${filenameHint}-${Date.now()}.json`, { type: 'application/json' });
+  const nav = navigator as Navigator & {
+    canShare?: (data: ShareData & { files?: File[] }) => boolean;
+    share?: (data: ShareData & { files?: File[] }) => Promise<void>;
+  };
+
+  if (nav.share && (!nav.canShare || nav.canShare({ files: [file] }))) {
+    await nav.share({
+      title: 'Meeting diagnostics log',
+      text: 'WebRTC media/signaling diagnostics log',
+      files: [file],
+    });
+    return;
+  }
+
+  downloadWebRTCLog(filenameHint);
 }
