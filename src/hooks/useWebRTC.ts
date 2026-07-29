@@ -54,6 +54,17 @@ export interface LocalDeviceSelection {
 
 type MediaKind = 'audio' | 'video';
 
+const LOCAL_MEDIA_MAX_RETRIES = 5;
+const PEER_RESTART_MAX_RETRIES = 4;
+
+function backoffDelay(attempt: number, base = 1000, max = 15000) {
+  return Math.min(max, base * 2 ** Math.max(0, attempt - 1));
+}
+
+function reasonCode(prefix: string, reason?: MediaErrorReason | string) {
+  return reason ? `${prefix}:${reason}` : prefix;
+}
+
 export function useWebRTC(meetingId: string, isInMeeting: boolean) {
   const localStreamRef = useRef<MediaStream | null>(null);
   const rawLocalStreamRef = useRef<MediaStream | null>(null);
@@ -99,6 +110,19 @@ export function useWebRTC(meetingId: string, isInMeeting: boolean) {
       facingMode: selectedDevicesRef.current.facingMode ?? 'user',
     };
   }, [selectedAudioInput, selectedVideoInput]);
+
+  const updateLocalMediaStatusFromStream = useCallback((stream: MediaStream | null, extra?: { retryAttempt?: number; errorCode?: string | null }) => {
+    const audioTrack = stream?.getAudioTracks().find((track) => track.readyState === 'live') ?? null;
+    const videoTrack = stream?.getVideoTracks().find((track) => track.readyState === 'live') ?? null;
+    setLocalMediaStatus({
+      audio: !isMicOn ? 'off' : audioTrack ? 'ok' : 'missing',
+      video: !isCameraOn ? 'off' : videoTrack ? 'ok' : 'missing',
+      audioLabel: !isMicOn ? 'Microphone off' : audioTrack?.label || 'Microphone not connected',
+      videoLabel: !isCameraOn ? 'Camera off' : videoTrack?.label || 'Camera not connected',
+      lastErrorCode: extra?.errorCode ?? null,
+      retryAttempt: extra?.retryAttempt ?? 0,
+    });
+  }, [isCameraOn, isMicOn, setLocalMediaStatus]);
 
   const ensurePresenceReady = useCallback(async () => {
     if (!meetingId || !meetingSessionId) return false;
