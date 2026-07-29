@@ -689,6 +689,7 @@ export function useWebRTC(meetingId: string, isInMeeting: boolean) {
     const previousStream = localStreamRef.current;
     localStreamRef.current = nextStream;
     setLocalStream(nextStream);
+    updateLocalMediaStatusFromStream(nextStream);
 
     peersRef.current.forEach((peer) => {
       const senders = peer.pc.getSenders();
@@ -698,11 +699,17 @@ export function useWebRTC(meetingId: string, isInMeeting: boolean) {
       let needsRenegotiation = false;
 
       senders.forEach((sender) => {
-        if (sender.track?.kind === 'audio') {
-          void sender.replaceTrack(nextAudioTrack);
+        const transceiver = transceivers.find((t) => t.sender === sender);
+        const senderKind = sender.track?.kind ?? transceiver?.receiver.track.kind;
+        if (senderKind === 'audio') {
+          void sender.replaceTrack(nextAudioTrack).catch((err) => {
+            logWebRTCEvent('error', 'replace-audio-track-failed', { reason: String(err) }, peer.peerId);
+          });
         }
-        if (sender.track?.kind === 'video') {
-          void sender.replaceTrack(nextVideoTrack);
+        if (senderKind === 'video') {
+          void sender.replaceTrack(nextVideoTrack).catch((err) => {
+            logWebRTCEvent('error', 'replace-video-track-failed', { reason: String(err) }, peer.peerId);
+          });
         }
       });
 
@@ -740,18 +747,51 @@ export function useWebRTC(meetingId: string, isInMeeting: boolean) {
     if (previousStream && previousStream !== nextStream && previousStream !== rawLocalStreamRef.current) {
       previousStream.getTracks().forEach((track) => track.stop());
     }
-  }, [sendOfferToPeer]);
+  }, [sendOfferToPeer, updateLocalMediaStatusFromStream]);
 
-  const mergeRawLocalTracks = useCallback((incomingStream: MediaStream) => {
+  const wireLocalTrackDiagnostics = useCallback((track: MediaStreamTrack) => {
+    const kind = track.kind as MediaKind;
+    const onEnded = () => {
+      const code = reasonCode(`${kind}-track-ended`);
+      logWebRTCEvent('media', 'local-track-ended', { kind, label: track.label, code });
+      setLocalMediaStatus({
+        [kind]: 'missing',
+        [`${kind}Label`]: `${kind === 'audio' ? 'Microphone' : 'Camera'} stopped`,
+        lastErrorCode: code,
+      } as Partial<ReturnType<typeof useMeetingStore.getState>['localMediaStatus']>);
+      acquireMissingLocalMediaRef.current(kind === 'audio', kind === 'video', undefined, code);
+    };
+    const onMute = () => {
+      logWebRTCEvent('media', 'local-track-muted', { kind, label: track.label });
+    };
+    const onUnmute = () => {
+      logWebRTCEvent('media', 'local-track-unmuted', { kind, label: track.label });
+      updateLocalMediaStatusFromStream(rawLocalStreamRef.current);
+    };
+    track.addEventListener('ended', onEnded);
+    track.addEventListener('mute', onMute);
+    track.addEventListener('unmute', onUnmute);
+  }, [setLocalMediaStatus, updateLocalMediaStatusFromStream]);
+
+  const mergeRawLocalTracks = useCallback((incomingStream: MediaStream, replaceKinds: MediaKind[] = []) => {
     const current = rawLocalStreamRef.current;
 
     if (!current) {
+      incomingStream.getTracks().forEach(wireLocalTrackDiagnostics);
       rawLocalStreamRef.current = incomingStream;
       applyProcessedLocalStream(incomingStream);
       return;
     }
 
     incomingStream.getTracks().forEach((track) => {
+      if (replaceKinds.includes(track.kind as MediaKind)) {
+        current.getTracks()
+          .filter((existing) => existing.kind === track.kind)
+          .forEach((existing) => {
+            current.removeTrack(existing);
+            existing.stop();
+          });
+      }
       const existingSameKind = current.getTracks().find((existing) => existing.kind === track.kind && existing.readyState === 'live');
       if (existingSameKind) {
         track.stop();
@@ -759,11 +799,12 @@ export function useWebRTC(meetingId: string, isInMeeting: boolean) {
       }
 
       track.enabled = track.kind === 'audio' ? useMeetingStore.getState().isMicOn : useMeetingStore.getState().isCameraOn;
+      wireLocalTrackDiagnostics(track);
       current.addTrack(track);
     });
 
     applyProcessedLocalStream(current);
-  }, [applyProcessedLocalStream]);
+  }, [applyProcessedLocalStream, wireLocalTrackDiagnostics]);
 
   const acquireMissingLocalMedia = useCallback(async (needsAudio: boolean, needsVideo: boolean) => {
     if (!isInMeeting || mediaAcquireInFlightRef.current || (!needsAudio && !needsVideo)) return;
