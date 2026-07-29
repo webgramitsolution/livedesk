@@ -5,6 +5,7 @@ import { createNoiseCancelledStream } from '@/lib/audio/noiseCancellation';
 import { toast } from 'sonner';
 import { logWebRTCEvent } from '@/lib/webrtcLogger';
 import { requestMeetingMedia, takePreflightStream, type MediaErrorReason } from '@/lib/mediaPreflight';
+import { recoverRemoteAudioPlayback } from '@/lib/remoteAudioRecovery';
 
 const ICE_SERVERS: RTCConfiguration = {
   iceServers: [
@@ -85,6 +86,9 @@ export function useWebRTC(meetingId: string, isInMeeting: boolean) {
   const [screenStream, setScreenStream] = useState<MediaStream | null>(null);
   const [remoteStreams, setRemoteStreams] = useState<Map<string, MediaStream>>(new Map());
   const [remoteScreenStream, setRemoteScreenStream] = useState<MediaStream | null>(null);
+  const [remoteScreenPeerId, setRemoteScreenPeerId] = useState<string | null>(null);
+  const remoteScreenByPeerRef = useRef<Map<string, MediaStream>>(new Map());
+  const lastRenegotiationReasonRef = useRef<Map<string, string>>(new Map());
   const {
     isMicOn,
     isCameraOn,
