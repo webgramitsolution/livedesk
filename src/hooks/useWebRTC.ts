@@ -1,6 +1,6 @@
 import { useEffect, useRef, useCallback, useState } from 'react';
 import { supabase } from '@/integrations/supabase/client';
-import { useMeetingStore } from '@/store/meetingStore';
+import { useMeetingStore, type LocalMediaStatus } from '@/store/meetingStore';
 import { createNoiseCancelledStream } from '@/lib/audio/noiseCancellation';
 import { toast } from 'sonner';
 import { logWebRTCEvent } from '@/lib/webrtcLogger';
@@ -758,7 +758,7 @@ export function useWebRTC(meetingId: string, isInMeeting: boolean) {
         [kind]: 'missing',
         [`${kind}Label`]: `${kind === 'audio' ? 'Microphone' : 'Camera'} stopped`,
         lastErrorCode: code,
-      } as Partial<ReturnType<typeof useMeetingStore.getState>['localMediaStatus']>);
+      } as Partial<LocalMediaStatus>);
       acquireMissingLocalMediaRef.current(kind === 'audio', kind === 'video', undefined, code);
     };
     const onMute = () => {
