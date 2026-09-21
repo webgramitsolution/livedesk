@@ -94,6 +94,13 @@ export function useRemoteControl(options: UseRemoteControlOptions) {
     { id: string; name: string; nonce: string; allowKeyboard: boolean; since: number } | null
   >(null);
   const [status, setStatus] = useState<ControlStatus>({ state: 'idle' });
+  // Exact reason the last permission handshake could not be applied
+  // (denied / revoked / timed out / presenter changed). Surfaced in the UI.
+  const [lastFailureReason, setLastFailureReason] = useState<string | null>(null);
+  // Bookkeeping for automatic session re-attach (tab switch, focus, network
+  // resume, or the screen-share sender changing mid-meeting).
+  const [reattachInfo, setReattachInfo] = useState<{ count: number; at: number; reason: string } | null>(null);
+  const reattachRef = useRef<((reason?: string) => void) | null>(null);
   const [controlLock, setControlLock] = useState<ControlLock | null>(null);
   const [metrics, setMetrics] = useState<RCMetrics>({
     requestsSent: 0,
@@ -145,11 +152,20 @@ export function useRemoteControl(options: UseRemoteControlOptions) {
     remotePresenterIdRef.current = remotePresenterId;
   }, [remotePresenterId]);
 
+  const lastHintRef = useRef<string | null>(null);
   useEffect(() => {
     if (isLocalPresenter || !presenterHintId) return;
-    setRemotePresenterId((current) => current ?? presenterHintId);
-    setRemotePresenterName((current) => (current === 'Presenter' ? 'Screen presenter' : current));
     knownPeersRef.current.add(presenterHintId);
+    const previous = lastHintRef.current;
+    lastHintRef.current = presenterHintId;
+    const senderChanged = !!previous && previous !== presenterHintId;
+    setRemotePresenterId((current) => (!current || senderChanged ? presenterHintId : current));
+    setRemotePresenterName((current) => (current === 'Presenter' ? 'Screen presenter' : current));
+    if (senderChanged) {
+      setStatus((cur) => (cur.state === 'idle' ? cur : { state: 'idle' }));
+      setLastFailureReason('Screen-share sender changed — control session was re-attached');
+      reattachRef.current?.('screen-sender-changed');
+    }
   }, [isLocalPresenter, presenterHintId]);
   const grantLatencySamples = useRef<number[]>([]);
   const requestQueueRef = useRef<IncomingRequest[]>([]);
@@ -404,6 +420,7 @@ export function useRemoteControl(options: UseRemoteControlOptions) {
           }
           setMetrics((m) => ({ ...m, deniesReceived: m.deniesReceived + 1 }));
           setStatus({ state: 'denied', presenterId: msg.from, reason: msg.reason, since: Date.now() });
+          setLastFailureReason(msg.reason ?? 'Presenter denied the control request');
           toast.error(`Control request denied${msg.reason ? `: ${msg.reason}` : ''}`);
           logRCAudit({
             action: 'deny',
@@ -427,6 +444,7 @@ export function useRemoteControl(options: UseRemoteControlOptions) {
           }
           // Presenter revoked our control.
           setStatus({ state: 'idle' });
+          setLastFailureReason(msg.reason ?? 'Presenter ended the remote control session');
           if (activeControllerRef.current?.id === msg.from) {
             setActiveController(null);
           }
@@ -628,8 +646,13 @@ export function useRemoteControl(options: UseRemoteControlOptions) {
       meetingId,
     });
     toast('Waiting for presenter to accept…');
+    setLastFailureReason(null);
     setTimeout(() => {
-      setStatus((cur) => (cur.state === 'requesting' ? { state: 'idle' } : cur));
+      setStatus((cur) => {
+        if (cur.state !== 'requesting') return cur;
+        setLastFailureReason('No response from the presenter (request timed out)');
+        return { state: 'idle' };
+      });
     }, REQUEST_TIMEOUT_MS);
   }, [remotePresenterId, sessionId, userName, send, meetingId]);
 
@@ -760,7 +783,53 @@ export function useRemoteControl(options: UseRemoteControlOptions) {
     return () => window.removeEventListener('keydown', onKey);
   }, [activeController, reclaimControl]);
 
+  /**
+   * Re-announce our presence/lock and re-issue a pending control request.
+   * Called automatically when the tab becomes visible again, on window focus,
+   * when the network comes back, and when the screen-share sender changes.
+   */
+  const reattachSession = useCallback(
+    (reason = 'manual') => {
+      if (!sessionId) return;
+      const st = statusRef.current;
+      send({ kind: 'presenter', from: sessionId, name: userNameRef.current, sharing: isLocalPresenterRef.current });
+      if (st.state === 'requesting') {
+        send({ kind: 'request', from: sessionId, name: userNameRef.current, to: st.presenterId });
+      }
+      if (isLocalPresenterRef.current) {
+        const ac = activeControllerRef.current;
+        broadcastLock(ac ? { id: ac.id, name: ac.name, allowKeyboard: ac.allowKeyboard } : null);
+      }
+      setReattachInfo((cur) => ({ count: (cur?.count ?? 0) + 1, at: Date.now(), reason }));
+    },
+    [sessionId, send, broadcastLock],
+  );
+
+  useEffect(() => {
+    reattachRef.current = reattachSession;
+  }, [reattachSession]);
+
+  useEffect(() => {
+    if (!isInMeeting) return;
+    const onVisibility = () => {
+      if (document.visibilityState === 'visible') reattachRef.current?.('tab-visible');
+    };
+    const onFocus = () => reattachRef.current?.('window-focus');
+    const onOnline = () => reattachRef.current?.('network-online');
+    document.addEventListener('visibilitychange', onVisibility);
+    window.addEventListener('focus', onFocus);
+    window.addEventListener('online', onOnline);
+    return () => {
+      document.removeEventListener('visibilitychange', onVisibility);
+      window.removeEventListener('focus', onFocus);
+      window.removeEventListener('online', onOnline);
+    };
+  }, [isInMeeting]);
+
   return {
+    lastFailureReason,
+    reattachInfo,
+    reattachSession,
     // presence + peers
     remotePresenterId,
     remotePresenterName,
