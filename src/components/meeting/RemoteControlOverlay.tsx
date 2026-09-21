@@ -290,8 +290,21 @@ export function RemoteControlOverlay({
     [remoteCursors],
   );
 
-  // Show a "Request Control" panel only if there IS a remote presenter and it's not us.
-  const canRequest = !!remotePresenterId && !isLocalPresenter;
+  // Remote Desktop is only offered when a live screen-share track is playing
+  // AND we are linked to the presenter peer that is sending it.
+  const presenterLinked = !!remotePresenterId && (!presenterPeerId || presenterPeerId === remotePresenterId);
+  const canRequest = !isLocalPresenter && presenterLinked && screenTrackLive;
+
+  const handshake: { tone: 'pending' | 'granted' | 'denied'; label: string } | null =
+    status.state === 'requesting'
+      ? { tone: 'pending', label: `Permission pending — waiting for ${remotePresenterName}` }
+      : status.state === 'controlling'
+        ? { tone: 'granted', label: `Permission granted${status.allowKeyboard ? ' (mouse + keyboard)' : ' (mouse only)'}` }
+        : status.state === 'denied'
+          ? { tone: 'denied', label: 'Permission denied' }
+          : lastFailureReason
+            ? { tone: 'denied', label: 'Permission not applied' }
+            : null;
 
   return (
     <div
