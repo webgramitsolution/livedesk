@@ -1,6 +1,20 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { MousePointer2, Hand, MonitorCog, KeyRound, X, Lock, Sliders, Activity, RefreshCw } from 'lucide-react';
+import {
+  MousePointer2,
+  MonitorCog,
+  KeyRound,
+  X,
+  Lock,
+  Sliders,
+  Activity,
+  RefreshCw,
+  Layers,
+  AlertTriangle,
+  CheckCircle2,
+  Clock,
+  MonitorUp,
+} from 'lucide-react';
 import type { UseRemoteControlReturn } from '@/hooks/useRemoteControl';
 import type { RCInputEvent } from '@/lib/remoteControl/protocol';
 import { RemoteControlSettingsPanel } from './RemoteControlSettingsPanel';
@@ -9,6 +23,65 @@ import { cn } from '@/lib/utils';
 interface RemoteControlOverlayProps {
   rc: UseRemoteControlReturn;
   meetingId: string;
+  /** True only when a live screen-share video track is playing. */
+  screenTrackLive?: boolean;
+  /** Peer id of the presenter whose screen track we are receiving. */
+  presenterPeerId?: string | null;
+  /** Collects per-peer transceiver/SSRC mapping for the validation panel. */
+  getDiagnosticsSnapshot?: () => Promise<unknown>;
+}
+
+interface PeerMappingRow {
+  peerId: string;
+  connectionState: string;
+  screenVideoSsrc: string | null;
+  screenMid: string | null;
+  screenDirection: string | null;
+  faceVideoSsrc: string | null;
+  audioSsrc: string | null;
+  hasScreenTrack: boolean;
+  isControlPeer: boolean;
+}
+
+/** Flattens a diagnostics snapshot into per-peer screen/control mapping rows. */
+function buildMappingRows(snapshot: unknown, presenterPeerId?: string | null): PeerMappingRow[] {
+  const peers = (snapshot as { peers?: unknown[] } | null)?.peers;
+  if (!Array.isArray(peers)) return [];
+  return peers.map((raw) => {
+    const peer = raw as {
+      peerId: string;
+      connectionState?: string;
+      routing?: { screenTracks?: Array<{ id: string }>; faceTracks?: Array<{ id: string; kind: string }> };
+      transceivers?: Array<{
+        mid: string | null;
+        direction?: string;
+        currentDirection?: string | null;
+        receiver?: { kind?: string | null; trackId?: string | null };
+      }>;
+      stats?: Array<Record<string, unknown>>;
+    };
+    const inbound = (peer.stats ?? []).filter((s) => s.type === 'inbound-rtp');
+    const videoInbound = inbound.filter((s) => s.kind === 'video' || s.mediaType === 'video');
+    const audioInbound = inbound.filter((s) => s.kind === 'audio' || s.mediaType === 'audio');
+    const screenTrackIds = new Set((peer.routing?.screenTracks ?? []).map((t) => t.id));
+    const screenTransceiver = (peer.transceivers ?? []).find(
+      (t) => t.receiver?.kind === 'video' && t.receiver?.trackId && screenTrackIds.has(t.receiver.trackId),
+    );
+    const ssrcOf = (report: Record<string, unknown> | undefined) =>
+      report && report.ssrc != null ? String(report.ssrc) : null;
+
+    return {
+      peerId: peer.peerId,
+      connectionState: peer.connectionState ?? 'unknown',
+      screenVideoSsrc: ssrcOf(videoInbound[videoInbound.length - 1]),
+      screenMid: screenTransceiver?.mid ?? null,
+      screenDirection: screenTransceiver?.currentDirection ?? screenTransceiver?.direction ?? null,
+      faceVideoSsrc: ssrcOf(videoInbound[0]),
+      audioSsrc: ssrcOf(audioInbound[0]),
+      hasScreenTrack: screenTrackIds.size > 0,
+      isControlPeer: !!presenterPeerId && peer.peerId === presenterPeerId,
+    };
+  });
 }
 
 /**
