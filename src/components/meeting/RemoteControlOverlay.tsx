@@ -1,6 +1,20 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { MousePointer2, Hand, MonitorCog, KeyRound, X, Lock, Sliders, Activity, RefreshCw } from 'lucide-react';
+import {
+  MousePointer2,
+  MonitorCog,
+  KeyRound,
+  X,
+  Lock,
+  Sliders,
+  Activity,
+  RefreshCw,
+  Layers,
+  AlertTriangle,
+  CheckCircle2,
+  Clock,
+  MonitorUp,
+} from 'lucide-react';
 import type { UseRemoteControlReturn } from '@/hooks/useRemoteControl';
 import type { RCInputEvent } from '@/lib/remoteControl/protocol';
 import { RemoteControlSettingsPanel } from './RemoteControlSettingsPanel';
@@ -9,6 +23,65 @@ import { cn } from '@/lib/utils';
 interface RemoteControlOverlayProps {
   rc: UseRemoteControlReturn;
   meetingId: string;
+  /** True only when a live screen-share video track is playing. */
+  screenTrackLive?: boolean;
+  /** Peer id of the presenter whose screen track we are receiving. */
+  presenterPeerId?: string | null;
+  /** Collects per-peer transceiver/SSRC mapping for the validation panel. */
+  getDiagnosticsSnapshot?: () => Promise<unknown>;
+}
+
+interface PeerMappingRow {
+  peerId: string;
+  connectionState: string;
+  screenVideoSsrc: string | null;
+  screenMid: string | null;
+  screenDirection: string | null;
+  faceVideoSsrc: string | null;
+  audioSsrc: string | null;
+  hasScreenTrack: boolean;
+  isControlPeer: boolean;
+}
+
+/** Flattens a diagnostics snapshot into per-peer screen/control mapping rows. */
+function buildMappingRows(snapshot: unknown, presenterPeerId?: string | null): PeerMappingRow[] {
+  const peers = (snapshot as { peers?: unknown[] } | null)?.peers;
+  if (!Array.isArray(peers)) return [];
+  return peers.map((raw) => {
+    const peer = raw as {
+      peerId: string;
+      connectionState?: string;
+      routing?: { screenTracks?: Array<{ id: string }>; faceTracks?: Array<{ id: string; kind: string }> };
+      transceivers?: Array<{
+        mid: string | null;
+        direction?: string;
+        currentDirection?: string | null;
+        receiver?: { kind?: string | null; trackId?: string | null };
+      }>;
+      stats?: Array<Record<string, unknown>>;
+    };
+    const inbound = (peer.stats ?? []).filter((s) => s.type === 'inbound-rtp');
+    const videoInbound = inbound.filter((s) => s.kind === 'video' || s.mediaType === 'video');
+    const audioInbound = inbound.filter((s) => s.kind === 'audio' || s.mediaType === 'audio');
+    const screenTrackIds = new Set((peer.routing?.screenTracks ?? []).map((t) => t.id));
+    const screenTransceiver = (peer.transceivers ?? []).find(
+      (t) => t.receiver?.kind === 'video' && t.receiver?.trackId && screenTrackIds.has(t.receiver.trackId),
+    );
+    const ssrcOf = (report: Record<string, unknown> | undefined) =>
+      report && report.ssrc != null ? String(report.ssrc) : null;
+
+    return {
+      peerId: peer.peerId,
+      connectionState: peer.connectionState ?? 'unknown',
+      screenVideoSsrc: ssrcOf(videoInbound[videoInbound.length - 1]),
+      screenMid: screenTransceiver?.mid ?? null,
+      screenDirection: screenTransceiver?.currentDirection ?? screenTransceiver?.direction ?? null,
+      faceVideoSsrc: ssrcOf(videoInbound[0]),
+      audioSsrc: ssrcOf(audioInbound[0]),
+      hasScreenTrack: screenTrackIds.size > 0,
+      isControlPeer: !!presenterPeerId && peer.peerId === presenterPeerId,
+    };
+  });
 }
 
 /**
@@ -20,11 +93,21 @@ interface RemoteControlOverlayProps {
  * 3. Input capture layer that only activates when the local viewer has been
  *    granted control. Pointer + keyboard events are streamed to the presenter.
  */
-export function RemoteControlOverlay({ rc, meetingId }: RemoteControlOverlayProps) {
+export function RemoteControlOverlay({
+  rc,
+  meetingId,
+  screenTrackLive = false,
+  presenterPeerId = null,
+  getDiagnosticsSnapshot,
+}: RemoteControlOverlayProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const lastSentRef = useRef<{ t: number; x: number; y: number }>({ t: 0, x: -1, y: -1 });
   const [showSettings, setShowSettings] = useState(false);
   const [showMetrics, setShowMetrics] = useState(false);
+  const [showMapping, setShowMapping] = useState(false);
+  const [mappingRows, setMappingRows] = useState<PeerMappingRow[] | null>(null);
+  const [mappingLoading, setMappingLoading] = useState(false);
+  const [mappingError, setMappingError] = useState<string | null>(null);
 
   const {
     remotePresenterId,
@@ -47,7 +130,31 @@ export function RemoteControlOverlay({ rc, meetingId }: RemoteControlOverlayProp
     sendCursor,
     sendRipple,
     sendInput,
+    lastFailureReason,
+    reattachInfo,
+    reattachSession,
   } = rc;
+
+  const loadMapping = useCallback(async () => {
+    if (!getDiagnosticsSnapshot) {
+      setMappingError('Mapping data is not available in this view.');
+      return;
+    }
+    setMappingLoading(true);
+    setMappingError(null);
+    try {
+      const snapshot = await getDiagnosticsSnapshot();
+      setMappingRows(buildMappingRows(snapshot, presenterPeerId));
+    } catch (error) {
+      setMappingError(String(error));
+    } finally {
+      setMappingLoading(false);
+    }
+  }, [getDiagnosticsSnapshot, presenterPeerId]);
+
+  useEffect(() => {
+    if (showMapping) void loadMapping();
+  }, [showMapping, loadMapping]);
 
   const isControlling = status.state === 'controlling';
 
@@ -183,8 +290,21 @@ export function RemoteControlOverlay({ rc, meetingId }: RemoteControlOverlayProp
     [remoteCursors],
   );
 
-  // Show a "Request Control" panel only if there IS a remote presenter and it's not us.
-  const canRequest = !!remotePresenterId && !isLocalPresenter;
+  // Remote Desktop is only offered when a live screen-share track is playing
+  // AND we are linked to the presenter peer that is sending it.
+  const presenterLinked = !!remotePresenterId && (!presenterPeerId || presenterPeerId === remotePresenterId);
+  const canRequest = !isLocalPresenter && presenterLinked && screenTrackLive;
+
+  const handshake: { tone: 'pending' | 'granted' | 'denied'; label: string } | null =
+    status.state === 'requesting'
+      ? { tone: 'pending', label: `Permission pending — waiting for ${remotePresenterName}` }
+      : status.state === 'controlling'
+        ? { tone: 'granted', label: `Permission granted${status.allowKeyboard ? ' (mouse + keyboard)' : ' (mouse only)'}` }
+        : status.state === 'denied'
+          ? { tone: 'denied', label: 'Permission denied' }
+          : lastFailureReason
+            ? { tone: 'denied', label: 'Permission not applied' }
+            : null;
 
   return (
     <div
@@ -316,7 +436,115 @@ export function RemoteControlOverlay({ rc, meetingId }: RemoteControlOverlayProp
           >
             <Sliders className="h-3 w-3" /> Tune
           </button>
+          <button
+            data-testid="rc-mapping-toggle"
+            onClick={() => setShowMapping((v) => !v)}
+            title="Validate which SSRC / transceiver carries the shared screen and desktop control"
+            className="inline-flex items-center gap-1 rounded-full border border-border bg-background/80 px-2.5 py-1 text-[10px] font-medium text-muted-foreground shadow hover:bg-muted backdrop-blur"
+          >
+            <Layers className="h-3 w-3" /> Mapping
+          </button>
         </div>
+
+        {/* Permission handshake status + exact failure reason */}
+        {handshake && (
+          <div
+            data-testid="rc-handshake-status"
+            role="status"
+            aria-live="polite"
+            className={cn(
+              'w-64 rounded-xl border px-3 py-2 text-[11px] shadow-lg backdrop-blur',
+              handshake.tone === 'granted'
+                ? 'border-emerald-500/40 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300'
+                : handshake.tone === 'pending'
+                  ? 'border-amber-500/40 bg-amber-500/10 text-amber-700 dark:text-amber-300'
+                  : 'border-destructive/40 bg-destructive/10 text-destructive',
+            )}
+          >
+            <div className="flex items-center gap-1.5 font-semibold">
+              {handshake.tone === 'granted' ? (
+                <CheckCircle2 className="h-3.5 w-3.5" />
+              ) : handshake.tone === 'pending' ? (
+                <Clock className="h-3.5 w-3.5" />
+              ) : (
+                <AlertTriangle className="h-3.5 w-3.5" />
+              )}
+              <span>{handshake.label}</span>
+            </div>
+            {handshake.tone !== 'granted' && lastFailureReason && (
+              <p className="mt-1 leading-snug opacity-90" data-testid="rc-failure-reason">
+                Reason: {lastFailureReason}
+              </p>
+            )}
+            {reattachInfo && (
+              <p className="mt-1 text-[10px] opacity-70">
+                Re-attached {reattachInfo.count}× · last: {reattachInfo.reason}
+              </p>
+            )}
+          </div>
+        )}
+
+        {/* Per-peer SSRC / transceiver mapping validation */}
+        {showMapping && (
+          <div
+            data-testid="rc-mapping-panel"
+            className="w-80 max-h-64 overflow-y-auto rounded-xl border border-border bg-background/95 p-3 text-[10px] shadow-lg backdrop-blur"
+          >
+            <div className="mb-2 flex items-center justify-between">
+              <span className="font-semibold text-foreground">Screen / control mapping</span>
+              <div className="flex items-center gap-1">
+                <button onClick={() => void loadMapping()} className="opacity-60 hover:opacity-100" aria-label="Refresh mapping">
+                  <RefreshCw className={cn('h-3 w-3', mappingLoading && 'animate-spin')} />
+                </button>
+                <button onClick={() => setShowMapping(false)} className="opacity-60 hover:opacity-100" aria-label="Hide mapping">
+                  <X className="h-3 w-3" />
+                </button>
+              </div>
+            </div>
+            {mappingError && <p className="text-destructive">{mappingError}</p>}
+            {!mappingError && (mappingRows?.length ?? 0) === 0 && !mappingLoading && (
+              <p className="text-muted-foreground">No connected peers yet.</p>
+            )}
+            <ul className="flex flex-col gap-2">
+              {(mappingRows ?? []).map((row) => (
+                <li key={row.peerId} className="rounded-lg border border-border/60 bg-muted/40 p-2">
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="truncate font-medium text-foreground">{row.peerId.slice(0, 12)}…</span>
+                    <span
+                      className={cn(
+                        'rounded-full px-2 py-0.5 text-[9px] font-semibold',
+                        row.isControlPeer ? 'bg-primary/15 text-primary' : 'bg-muted text-muted-foreground',
+                      )}
+                    >
+                      {row.isControlPeer ? 'Control peer' : row.connectionState}
+                    </span>
+                  </div>
+                  <dl className="mt-1 grid grid-cols-2 gap-x-2 tabular-nums">
+                    <dt className="text-muted-foreground">Screen track</dt>
+                    <dd className={cn('text-right', row.hasScreenTrack ? 'text-emerald-600 dark:text-emerald-400' : 'text-destructive')}>
+                      {row.hasScreenTrack ? 'present' : 'missing'}
+                    </dd>
+                    <dt className="text-muted-foreground">Screen SSRC</dt>
+                    <dd className="text-right">{row.screenVideoSsrc ?? '—'}</dd>
+                    <dt className="text-muted-foreground">Screen mid / dir</dt>
+                    <dd className="text-right">
+                      {row.screenMid ?? '—'} / {row.screenDirection ?? '—'}
+                    </dd>
+                    <dt className="text-muted-foreground">Camera SSRC</dt>
+                    <dd className="text-right">{row.faceVideoSsrc ?? '—'}</dd>
+                    <dt className="text-muted-foreground">Audio SSRC</dt>
+                    <dd className="text-right">{row.audioSsrc ?? '—'}</dd>
+                  </dl>
+                  {row.isControlPeer && !row.hasScreenTrack && (
+                    <p className="mt-1 text-destructive">
+                      Control peer has no screen video — Remote Desktop stays hidden until the share track arrives.
+                    </p>
+                  )}
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
 
         {showMetrics && metrics && (
           <div
