@@ -93,11 +93,21 @@ function buildMappingRows(snapshot: unknown, presenterPeerId?: string | null): P
  * 3. Input capture layer that only activates when the local viewer has been
  *    granted control. Pointer + keyboard events are streamed to the presenter.
  */
-export function RemoteControlOverlay({ rc, meetingId }: RemoteControlOverlayProps) {
+export function RemoteControlOverlay({
+  rc,
+  meetingId,
+  screenTrackLive = false,
+  presenterPeerId = null,
+  getDiagnosticsSnapshot,
+}: RemoteControlOverlayProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const lastSentRef = useRef<{ t: number; x: number; y: number }>({ t: 0, x: -1, y: -1 });
   const [showSettings, setShowSettings] = useState(false);
   const [showMetrics, setShowMetrics] = useState(false);
+  const [showMapping, setShowMapping] = useState(false);
+  const [mappingRows, setMappingRows] = useState<PeerMappingRow[] | null>(null);
+  const [mappingLoading, setMappingLoading] = useState(false);
+  const [mappingError, setMappingError] = useState<string | null>(null);
 
   const {
     remotePresenterId,
