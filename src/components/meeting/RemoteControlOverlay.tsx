@@ -130,7 +130,31 @@ export function RemoteControlOverlay({
     sendCursor,
     sendRipple,
     sendInput,
+    lastFailureReason,
+    reattachInfo,
+    reattachSession,
   } = rc;
+
+  const loadMapping = useCallback(async () => {
+    if (!getDiagnosticsSnapshot) {
+      setMappingError('Mapping data is not available in this view.');
+      return;
+    }
+    setMappingLoading(true);
+    setMappingError(null);
+    try {
+      const snapshot = await getDiagnosticsSnapshot();
+      setMappingRows(buildMappingRows(snapshot, presenterPeerId));
+    } catch (error) {
+      setMappingError(String(error));
+    } finally {
+      setMappingLoading(false);
+    }
+  }, [getDiagnosticsSnapshot, presenterPeerId]);
+
+  useEffect(() => {
+    if (showMapping) void loadMapping();
+  }, [showMapping, loadMapping]);
 
   const isControlling = status.state === 'controlling';
 
