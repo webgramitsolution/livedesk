@@ -648,11 +648,9 @@ export function useRemoteControl(options: UseRemoteControlOptions) {
     toast('Waiting for presenter to accept…');
     setLastFailureReason(null);
     setTimeout(() => {
-      setStatus((cur) => {
-        if (cur.state !== 'requesting') return cur;
-        setLastFailureReason('No response from the presenter (request timed out)');
-        return { state: 'idle' };
-      });
+      if (statusRef.current.state !== 'requesting') return;
+      setLastFailureReason('No response from the presenter (request timed out)');
+      setStatus({ state: 'idle' });
     }, REQUEST_TIMEOUT_MS);
   }, [remotePresenterId, sessionId, userName, send, meetingId]);
 
