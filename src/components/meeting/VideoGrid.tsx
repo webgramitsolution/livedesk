@@ -40,7 +40,7 @@ function ScreenShareVideo({ stream, isLocal }: { stream: MediaStream; isLocal?: 
   );
 }
 
-export function VideoGrid({ localStream, remoteStreams, screenStream, remoteScreenStream, remoteScreenPeerId }: VideoGridProps) {
+export function VideoGrid({ localStream, remoteStreams, screenStream, remoteScreenStream, remoteScreenPeerId, getDiagnosticsSnapshot }: VideoGridProps) {
   const { participants, transcript, isTranslationEnabled, isScreenSharing, isSelfCapture, toggleScreenShare, selectedLanguage, meetingId } =
     useMeetingStore();
   const [whiteboardActive, setWhiteboardActive] = useState(false);
