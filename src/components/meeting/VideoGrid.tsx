@@ -14,6 +14,7 @@ interface VideoGridProps {
   screenStream?: MediaStream | null;
   remoteScreenStream?: MediaStream | null;
   remoteScreenPeerId?: string | null;
+  getDiagnosticsSnapshot?: () => Promise<unknown>;
 }
 
 function ScreenShareVideo({ stream, isLocal }: { stream: MediaStream; isLocal?: boolean }) {
