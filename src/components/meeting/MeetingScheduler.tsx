@@ -74,9 +74,7 @@ export function MeetingScheduler({ isOpen, onClose }: { isOpen: boolean; onClose
   }, [isOpen, fetchMeetings]);
 
   const generateMeetingId = () => {
-    const chars = 'abcdefghijklmnopqrstuvwxyz';
-    const seg = () => Array.from({ length: 3 }, () => chars[Math.floor(Math.random() * chars.length)]).join('');
-    return `${seg()}-${seg()}-${seg()}`;
+    return (() => { const a = 'abcdefghijkmnpqrstuvwxyz23456789'; const b = crypto.getRandomValues(new Uint8Array(12)); const s = Array.from(b, (x) => a[x % 32]).join(''); return `${s.slice(0,4)}-${s.slice(4,8)}-${s.slice(8,12)}`; })();
   };
 
   const addInvitee = () => {
