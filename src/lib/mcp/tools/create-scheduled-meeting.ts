@@ -10,8 +10,7 @@ function supabaseForUser(ctx: ToolContext) {
 }
 
 function generateMeetingCode() {
-  const part = () => Math.random().toString(36).slice(2, 6);
-  return `${part()}-${part()}-${part()}`;
+  return (() => { const a = 'abcdefghijkmnpqrstuvwxyz23456789'; const b = crypto.getRandomValues(new Uint8Array(12)); const s = Array.from(b, (x) => a[x % 32]).join(''); return `${s.slice(0,4)}-${s.slice(4,8)}-${s.slice(8,12)}`; })();
 }
 
 export default defineTool({
