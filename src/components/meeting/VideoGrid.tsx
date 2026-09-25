@@ -66,6 +66,12 @@ export function VideoGrid({ localStream, remoteStreams, screenStream, remoteScre
   const suppressLocalPreview = !!(isSelfCapture && isScreenSharing);
   const activeScreenStream = suppressLocalPreview ? remoteScreenStream : (screenStream || remoteScreenStream);
 
+  // Remote Desktop is only offered when an incoming screen-share video track is
+  // actually live (not ended/muted) — i.e. we really are watching the presenter.
+  const remoteScreenTrackLive = !!remoteScreenStream
+    ?.getVideoTracks()
+    .some((t) => t.readyState === 'live' && !t.muted);
+
   // Static thumbnail: capture ONE frame from the camera stream when we start
   // suppressing the preview, so the "You are presenting" card shows a real
   // presenter thumbnail (Zoom/Meet-style) instead of a spinning video.
