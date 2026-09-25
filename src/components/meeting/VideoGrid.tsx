@@ -14,6 +14,7 @@ interface VideoGridProps {
   screenStream?: MediaStream | null;
   remoteScreenStream?: MediaStream | null;
   remoteScreenPeerId?: string | null;
+  getDiagnosticsSnapshot?: () => Promise<unknown>;
 }
 
 function ScreenShareVideo({ stream, isLocal }: { stream: MediaStream; isLocal?: boolean }) {
@@ -39,7 +40,7 @@ function ScreenShareVideo({ stream, isLocal }: { stream: MediaStream; isLocal?: 
   );
 }
 
-export function VideoGrid({ localStream, remoteStreams, screenStream, remoteScreenStream, remoteScreenPeerId }: VideoGridProps) {
+export function VideoGrid({ localStream, remoteStreams, screenStream, remoteScreenStream, remoteScreenPeerId, getDiagnosticsSnapshot }: VideoGridProps) {
   const { participants, transcript, isTranslationEnabled, isScreenSharing, isSelfCapture, toggleScreenShare, selectedLanguage, meetingId } =
     useMeetingStore();
   const [whiteboardActive, setWhiteboardActive] = useState(false);
@@ -64,6 +65,12 @@ export function VideoGrid({ localStream, remoteStreams, screenStream, remoteScre
   // the outgoing track — only local rendering is replaced with a static thumbnail.
   const suppressLocalPreview = !!(isSelfCapture && isScreenSharing);
   const activeScreenStream = suppressLocalPreview ? remoteScreenStream : (screenStream || remoteScreenStream);
+
+  // Remote Desktop is only offered when an incoming screen-share video track is
+  // actually live (not ended/muted) — i.e. we really are watching the presenter.
+  const remoteScreenTrackLive = !!remoteScreenStream
+    ?.getVideoTracks()
+    .some((t) => t.readyState === 'live' && !t.muted);
 
   // Static thumbnail: capture ONE frame from the camera stream when we start
   // suppressing the preview, so the "You are presenting" card shows a real
@@ -172,7 +179,13 @@ export function VideoGrid({ localStream, remoteStreams, screenStream, remoteScre
             </div>
           )}
           {/* Remote-control cursor + input overlay */}
-          <RemoteControlOverlay rc={rc} meetingId={meetingId} />
+          <RemoteControlOverlay
+            rc={rc}
+            meetingId={meetingId}
+            screenTrackLive={remoteScreenTrackLive}
+            presenterPeerId={remoteScreenPeerId}
+            getDiagnosticsSnapshot={getDiagnosticsSnapshot}
+          />
           {isScreenSharing && (
             <div className="pointer-events-none absolute bottom-4 inset-x-0 mx-auto z-20 flex w-[min(calc(100%-1rem),28rem)] justify-center">
               <div className="pointer-events-auto flex items-center gap-2 rounded-full border border-border bg-background/95 px-2.5 py-2 backdrop-blur-md control-bar-elevated">

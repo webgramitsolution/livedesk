@@ -151,7 +151,7 @@ export function MeetingRoom() {
       <NavigationBar />
       <div className="flex-1 flex overflow-hidden">
         <div ref={videoAreaRef} className="flex-1 relative flex flex-col min-w-0">
-          <VideoGrid localStream={processedLocalStream} remoteStreams={remoteStreams} screenStream={screenStream} remoteScreenStream={remoteScreenStream} remoteScreenPeerId={remoteScreenPeerId} />
+          <VideoGrid localStream={processedLocalStream} remoteStreams={remoteStreams} screenStream={screenStream} remoteScreenStream={remoteScreenStream} remoteScreenPeerId={remoteScreenPeerId} getDiagnosticsSnapshot={getDiagnosticsSnapshot} />
           <FloatingControlBar />
         </div>
         <AISidebar />

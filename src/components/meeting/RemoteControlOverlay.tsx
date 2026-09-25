@@ -586,13 +586,25 @@ export function RemoteControlOverlay({
         )}
 
         {canRequest && status.state === 'idle' && (
-          <button
-            onClick={requestControl}
-            className="pointer-events-auto inline-flex items-center gap-2 rounded-full border border-border bg-background/90 px-3 py-1.5 text-xs font-medium text-foreground shadow hover:bg-muted backdrop-blur"
-          >
-            <Hand className="h-3.5 w-3.5 text-primary" />
-            Request Control
-          </button>
+          <div className="flex items-center gap-1">
+            <button
+              data-testid="rc-remote-desktop-button"
+              onClick={requestControl}
+              title={`Request desktop control of ${remotePresenterName}'s shared screen`}
+              className="pointer-events-auto inline-flex items-center gap-2 rounded-full bg-primary px-3 py-1.5 text-xs font-semibold text-primary-foreground shadow hover:bg-primary/90"
+            >
+              <MonitorUp className="h-3.5 w-3.5" />
+              Remote Desktop
+            </button>
+            <button
+              onClick={() => reattachSession('manual')}
+              title="Re-attach the remote control session"
+              className="inline-flex items-center rounded-full border border-border bg-background/80 p-1.5 text-muted-foreground shadow hover:bg-muted backdrop-blur"
+              aria-label="Re-attach remote control session"
+            >
+              <RefreshCw className="h-3 w-3" />
+            </button>
+          </div>
         )}
 
         {canRequest && status.state === 'requesting' && (
