@@ -12,7 +12,7 @@ export async function recoverRemoteAudioPlayback(reason = 'manual') {
       try {
         // Elements flagged by permission enforcement stay muted.
         if (audio.dataset.forceMuted !== 'true') audio.muted = false;
-        audio.volume = 1;
+        // Volume is owned by the translation audio mode (VideoTile); leave it.
         await audio.play();
         played += 1;
       } catch (error) {

@@ -23,12 +23,31 @@ export interface Participant {
   spokenLanguage: string;
 }
 
+export type TranscriptStatus = 'live' | 'final' | 'translating' | 'translated' | 'low-confidence' | 'error';
+
 export interface TranscriptEntry {
   id: string;
+  speakerId: string;
   speaker: string;
   text: string;
+  translatedText: string | null;
+  sourceLanguage: string;
+  targetLanguage: string | null;
+  confidence: number | null;
+  status: TranscriptStatus;
   timestamp: string;
+  at: number;
+  /** Recent enough to show as a subtitle over the speaker's tile. */
   isActive: boolean;
+}
+
+export interface TranslationRuntimeStatus {
+  stt: 'idle' | 'starting' | 'listening' | 'error' | 'unavailable';
+  sttProvider: string | null;
+  sttDetail: string | null;
+  ttsAvailable: boolean;
+  translationProvider: string | null;
+  lastError: string | null;
 }
 
 export interface ChatMessage {
@@ -145,6 +164,7 @@ interface MeetingState {
   localMediaStatus: LocalMediaStatus;
   session: MeetingSessionState;
   translation: TranslationSettings;
+  translationStatus: TranslationRuntimeStatus;
 
   // Settings state
   selectedLanguage: string;
@@ -193,6 +213,11 @@ interface MeetingState {
   setSession: (patch: Partial<MeetingSessionState>) => void;
   setPermissionRows: (rows: Record<string, ParticipantPermission>) => void;
   setTranslation: (patch: Partial<TranslationSettings>) => void;
+  setTranslationStatus: (patch: Partial<TranslationRuntimeStatus>) => void;
+  upsertTranscript: (entry: TranscriptEntry) => void;
+  patchTranscript: (id: string, patch: Partial<TranscriptEntry>) => void;
+  expireTranscripts: (olderThanMs: number) => void;
+  clearTranscript: () => void;
   setParticipantSpeaking: (participantId: string, speaking: boolean) => void;
   setParticipantLanguage: (sessionId: string, language: string) => void;
   /** Effective permission for a session id (host rights, rows and global controls applied). */
@@ -359,7 +384,7 @@ export const useMeetingStore = create<MeetingState>((set, get) => ({
   isRecording: false,
   recordingStartTime: null,
   meetingJoinedAt: persistedMeetingState?.meetingJoinedAt ?? null,
-  isTranslationEnabled: true,
+  isTranslationEnabled: readPersistedTranslation().enabled,
   isNoiseCancellationOn: persistedMeetingState?.isNoiseCancellationOn ?? false,
   isPipActive: false,
   isSettingsOpen: false,
@@ -384,6 +409,7 @@ export const useMeetingStore = create<MeetingState>((set, get) => ({
   localMediaStatus: INITIAL_LOCAL_MEDIA_STATUS,
   session: INITIAL_SESSION,
   translation: readPersistedTranslation(),
+  translationStatus: { stt: 'idle', sttProvider: null, sttDetail: null, ttsAvailable: false, translationProvider: null, lastError: null },
   selectedLanguage: persistedMeetingState?.selectedLanguage ?? 'en',
   selectedAudioInput: persistedMeetingState?.selectedAudioInput ?? 'default',
   selectedAudioOutput: persistedMeetingState?.selectedAudioOutput ?? 'default',
@@ -406,7 +432,16 @@ export const useMeetingStore = create<MeetingState>((set, get) => ({
       isRecording: !s.isRecording,
       recordingStartTime: !s.isRecording ? Date.now() : null,
     })),
-  toggleTranslation: () => set((s) => ({ isTranslationEnabled: !s.isTranslationEnabled })),
+  toggleTranslation: () =>
+    set((s) => {
+      const translation = { ...s.translation, enabled: !s.translation.enabled };
+      try {
+        window.localStorage.setItem('livedesk-translation', JSON.stringify(translation));
+      } catch {
+        /* best effort */
+      }
+      return { translation, isTranslationEnabled: translation.enabled };
+    }),
   toggleNoiseCancellation: () => set((s) => ({ isNoiseCancellationOn: !s.isNoiseCancellationOn })),
   togglePip: () => set((s) => ({ isPipActive: !s.isPipActive })),
   toggleSettings: () => set((s) => ({ isSettingsOpen: !s.isSettingsOpen })),
@@ -472,8 +507,24 @@ export const useMeetingStore = create<MeetingState>((set, get) => ({
       } catch {
         /* persistence is best-effort */
       }
-      return { translation, selectedLanguage: translation.preferredLanguage };
+      return { translation, selectedLanguage: translation.preferredLanguage, isTranslationEnabled: translation.enabled };
     }),
+  setTranslationStatus: (patch) => set((s) => ({ translationStatus: { ...s.translationStatus, ...patch } })),
+  upsertTranscript: (entry) =>
+    set((s) => {
+      const index = s.transcript.findIndex((t) => t.id === entry.id);
+      const transcript = index >= 0 ? s.transcript.map((t, i) => (i === index ? entry : t)) : [...s.transcript, entry];
+      return { transcript: transcript.slice(-200) };
+    }),
+  patchTranscript: (id, patch) =>
+    set((s) => ({ transcript: s.transcript.map((t) => (t.id === id ? { ...t, ...patch } : t)) })),
+  expireTranscripts: (olderThanMs) =>
+    set((s) => {
+      const cutoff = Date.now() - olderThanMs;
+      if (!s.transcript.some((t) => t.isActive && t.at < cutoff)) return {};
+      return { transcript: s.transcript.map((t) => (t.isActive && t.at < cutoff ? { ...t, isActive: false } : t)) };
+    }),
+  clearTranscript: () => set({ transcript: [] }),
   setParticipantSpeaking: (participantId, speaking) =>
     set((s) => {
       const target = s.participants.find((p) => p.id === participantId);
@@ -603,6 +654,7 @@ export const useMeetingStore = create<MeetingState>((set, get) => ({
       breakoutRooms: [],
       showSummary: false,
       summaryPoints: [],
+      transcript: [],
       session: { ...INITIAL_SESSION, leaveReason: get().session.leaveReason },
     });
   },

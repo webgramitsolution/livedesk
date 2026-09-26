@@ -2,6 +2,8 @@ import { MicOff, VideoOff, Hand, Languages, Volume2, VolumeX, AlertTriangle } fr
 import { type Participant, type FloatingReaction, useMeetingStore } from '@/store/meetingStore';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useCallback, useEffect, useMemo, useState, useRef } from 'react';
+import { originalAudioVolume } from '@/lib/translation/pipeline';
+import { languageLabel } from '@/lib/translation/languages';
 
 interface VideoTileProps {
   participant: Participant;
@@ -39,29 +41,17 @@ function FloatingEmoji({ reaction, onDone }: { reaction: FloatingReaction; onDon
   );
 }
 
+// Driven by the real voice-activity detector (see useTranslationPipeline).
 function AudioLevelBars({ isMuted, isSpeaking }: { isMuted: boolean; isSpeaking: boolean }) {
-  const [levels, setLevels] = useState([0, 0, 0, 0]);
-
-  useEffect(() => {
-    if (isMuted) { setLevels([0, 0, 0, 0]); return; }
-    const id = setInterval(() => {
-      setLevels(
-        Array.from({ length: 4 }, () =>
-          isSpeaking ? 30 + Math.random() * 70 : 5 + Math.random() * 20
-        )
-      );
-    }, 150);
-    return () => clearInterval(id);
-  }, [isMuted, isSpeaking]);
-
+  const heights = isMuted ? [8, 8, 8, 8] : isSpeaking ? [55, 90, 70, 100] : [12, 16, 12, 16];
   return (
-    <div className="flex items-end gap-[2px] h-4">
-      {levels.map((l, i) => (
+    <div className="flex items-end gap-[2px] h-4" aria-hidden="true">
+      {heights.map((h, i) => (
         <motion.div
           key={i}
           className={`w-[3px] rounded-full ${isSpeaking ? 'bg-success' : 'bg-muted-foreground/60'}`}
-          animate={{ height: `${Math.max(l, 8)}%` }}
-          transition={{ duration: 0.1 }}
+          animate={{ height: `${h}%` }}
+          transition={{ duration: 0.15, repeat: isSpeaking ? Infinity : 0, repeatType: 'reverse' }}
         />
       ))}
     </div>
@@ -84,6 +74,20 @@ export function VideoTile({ participant, subtitle, compact, mediaStream }: Video
   const removeReaction = useMeetingStore((s) => s.removeReaction);
   const isTranslationEnabled = useMeetingStore((s) => s.isTranslationEnabled);
   const selectedLanguage = useMeetingStore((s) => s.selectedLanguage);
+  const translation = useMeetingStore((s) => s.translation);
+  const ttsAvailable = useMeetingStore((s) => s.translationStatus.ttsAvailable);
+  const selectedAudioOutput = useMeetingStore((s) => s.selectedAudioOutput);
+  useEffect(() => {
+    const el = audioRef.current as (HTMLAudioElement & { setSinkId?: (id: string) => Promise<void> }) | null;
+    if (!el || participant.id === '1' || typeof el.setSinkId !== 'function') return;
+    void el.setSinkId(selectedAudioOutput === 'default' ? '' : selectedAudioOutput).catch(() => undefined);
+  }, [selectedAudioOutput, participant.id, mediaStream]);
+  // Original voice stays on the media plane; only local playback volume follows the audio mode.
+  const originalVolume = participant.id === '1' ? 1 : originalAudioVolume(participant.spokenLanguage, { ...translation, ttsAvailable });
+  useEffect(() => {
+    if (participant.id === '1' || !audioRef.current) return;
+    audioRef.current.volume = originalVolume;
+  }, [originalVolume, participant.id, mediaStream]);
   // Receiver-side permission enforcement: a participant the host muted is not
   // played back here even if their client keeps sending audio.
   const permissionRows = useMeetingStore((s) => s.session.permissionRows);
@@ -128,7 +132,7 @@ export function VideoTile({ participant, subtitle, compact, mediaStream }: Video
       remoteAudioStreamRef.current = audioOnlyStream;
       audioRef.current.srcObject = audioOnlyStream;
       audioRef.current.muted = !remoteCanSpeak;
-      audioRef.current.volume = 1;
+      audioRef.current.volume = originalVolume;
     }
 
     const playMedia = async () => {
@@ -182,8 +186,7 @@ export function VideoTile({ participant, subtitle, compact, mediaStream }: Video
     }
   };
 
-  const LANG_FLAGS: Record<string, string> = { en: '🇬🇧', zh: '🇨🇳', es: '🇪🇸', hi: '🇮🇳', ko: '🇰🇷', ja: '🇯🇵', fr: '🇫🇷', de: '🇩🇪', ar: '🇸🇦', pt: '🇧🇷' };
-  const showTranslationBadge = isTranslationEnabled && participant.spokenLanguage !== selectedLanguage && !compact;
+  const showTranslationBadge = isTranslationEnabled && participant.id !== '1' && participant.spokenLanguage !== selectedLanguage && !compact;
 
   const hasVideoTrack = mediaStream?.getVideoTracks().some((t) => t.enabled && t.readyState === 'live');
   const showRealVideo = participant.isCameraOn && mediaStream && hasVideoTrack;
@@ -300,10 +303,10 @@ export function VideoTile({ participant, subtitle, compact, mediaStream }: Video
           animate={{ opacity: 1, scale: 1 }}
           className="absolute bottom-10 right-2 z-10"
         >
-          <div className="flex items-center gap-1 px-1.5 py-0.5 rounded-full bg-primary/90 backdrop-blur-sm">
-            <span className="text-[10px]">{LANG_FLAGS[participant.spokenLanguage] || '🌐'}</span>
-            <Languages className="w-2.5 h-2.5 text-primary-foreground" />
-            <span className="text-[10px]">{LANG_FLAGS[selectedLanguage] || '🌐'}</span>
+          <div className="flex items-center gap-1 rounded-full bg-primary/90 px-1.5 py-0.5 text-[10px] text-primary-foreground backdrop-blur-sm" title={`Live Translation: ${languageLabel(participant.spokenLanguage)} → ${languageLabel(selectedLanguage)}`}>
+            <span>{languageLabel(participant.spokenLanguage)}</span>
+            <Languages className="h-2.5 w-2.5" />
+            <span>{languageLabel(selectedLanguage)}</span>
           </div>
         </motion.div>
       )}

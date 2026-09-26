@@ -21,6 +21,7 @@ import { useIsMobile } from '@/hooks/use-mobile';
 import { useWebRTC } from '@/hooks/useWebRTC';
 import { useMeetingRecorder } from '@/hooks/useMeetingRecorder';
 import { useVirtualBackground } from '@/hooks/useVirtualBackground';
+import { useTranslationPipeline } from '@/hooks/useTranslationPipeline';
 import { recoverRemoteAudioPlayback } from '@/lib/remoteAudioRecovery';
 import { useMeetingStore } from '@/store/meetingStore';
 import { motion } from 'framer-motion';
@@ -67,6 +68,17 @@ export function MeetingRoom() {
     },
   });
   const processedLocalStream = useVirtualBackground(localStream);
+  useTranslationPipeline({ enabled: screen === 'meeting', localStream, remoteStreams });
+
+  // Settings modal device changes are applied by useWebRTC (track replacement).
+  useEffect(() => {
+    const onSelect = (e: Event) => {
+      const detail = (e as CustomEvent<{ audioDeviceId?: string; videoDeviceId?: string }>).detail;
+      if (detail) selectLocalDevices(detail);
+    };
+    window.addEventListener('livedesk:select-devices', onSelect);
+    return () => window.removeEventListener('livedesk:select-devices', onSelect);
+  }, [selectLocalDevices]);
   const { startRecording, stopRecording, recordingBlob, downloadRecording, clearRecording } = useMeetingRecorder();
   const [soundUnlockVisible, setSoundUnlockVisible] = useState(false);
 

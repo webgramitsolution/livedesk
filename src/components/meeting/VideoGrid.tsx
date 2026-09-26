@@ -229,19 +229,17 @@ export function VideoGrid({ localStream, remoteStreams, screenStream, remoteScre
     return () => { cancelled = true; el.pause(); el.srcObject = null; };
   }, [suppressLocalPreview, localStream]);
 
-  const TRANSLATED_SUBTITLES: Record<string, Record<string, string>> = {
-    'Sarah Chen': { hi: 'मुझे Q4 से नवीनतम मेट्रिक्स साझा करने दें...', es: 'Permítanme compartir las últimas métricas del Q4...', fr: 'Permettez-moi de partager les dernières métriques du Q4...' },
-  };
-
-  const getSubtitle = (participantName: string) => {
+  // Latest caption for a participant: translated text when available,
+  // otherwise the original (captions are shown for ~6s after speech).
+  const getSubtitle = (p: typeof participants[0]) => {
     if (!isTranslationEnabled) return undefined;
-    const entry = transcript.find((t) => t.speaker === participantName && t.isActive);
+    const speakerId = p.id === '1' ? meetingSessionId : p.sessionId;
+    const entries = transcript.filter((t) => t.speakerId === speakerId && t.isActive);
+    const entry = entries[entries.length - 1];
     if (!entry) return undefined;
-    if (selectedLanguage !== 'en' && TRANSLATED_SUBTITLES[participantName]?.[selectedLanguage]) {
-      return TRANSLATED_SUBTITLES[participantName][selectedLanguage];
-    }
-    return entry.text;
+    return entry.translatedText ?? entry.text;
   };
+  void selectedLanguage;
 
   const getStreamForParticipant = (p: typeof participants[0]) => {
     if (p.id === '1') return localStream || null;
@@ -340,7 +338,7 @@ export function VideoGrid({ localStream, remoteStreams, screenStream, remoteScre
         <div className="flex gap-2 h-24 sm:h-28 md:h-32 shrink-0 overflow-x-auto pb-1">
           {participants.map((p) => (
             <div key={p.id} className="h-full aspect-video shrink-0">
-              <VideoTile participant={p} subtitle={getSubtitle(p.name)} compact mediaStream={getStreamForParticipant(p)} />
+              <VideoTile participant={p} subtitle={getSubtitle(p)} compact mediaStream={getStreamForParticipant(p)} />
             </div>
           ))}
         </div>
@@ -351,7 +349,7 @@ export function VideoGrid({ localStream, remoteStreams, screenStream, remoteScre
   return (
     <div className="flex-1 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2 sm:gap-3 p-2 sm:p-4 auto-rows-fr">
       {participants.map((p) => (
-        <VideoTile key={p.id} participant={p} subtitle={getSubtitle(p.name)} mediaStream={getStreamForParticipant(p)} />
+        <VideoTile key={p.id} participant={p} subtitle={getSubtitle(p)} mediaStream={getStreamForParticipant(p)} />
       ))}
     </div>
   );
