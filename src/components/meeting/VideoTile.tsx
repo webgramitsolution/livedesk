@@ -84,6 +84,22 @@ export function VideoTile({ participant, subtitle, compact, mediaStream }: Video
   const removeReaction = useMeetingStore((s) => s.removeReaction);
   const isTranslationEnabled = useMeetingStore((s) => s.isTranslationEnabled);
   const selectedLanguage = useMeetingStore((s) => s.selectedLanguage);
+  // Receiver-side permission enforcement: a participant the host muted is not
+  // played back here even if their client keeps sending audio.
+  const permissionRows = useMeetingStore((s) => s.session.permissionRows);
+  const meetingControls = useMeetingStore((s) => s.session.meetingControls);
+  const hostSessionId = useMeetingStore((s) => s.session.hostSessionId);
+  const remoteCanSpeak = useMemo(() => {
+    if (participant.id === '1') return true;
+    return useMeetingStore.getState().permissionFor(participant.sessionId).canSpeak;
+    // permissionRows / meetingControls / hostSessionId are the inputs of permissionFor.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [participant.id, participant.sessionId, permissionRows, meetingControls, hostSessionId]);
+  useEffect(() => {
+    if (participant.id === '1' || !audioRef.current) return;
+    audioRef.current.muted = !remoteCanSpeak;
+    audioRef.current.dataset.forceMuted = remoteCanSpeak ? 'false' : 'true';
+  }, [remoteCanSpeak, participant.id, mediaStream]);
   const reactions = useMemo(
     () => allReactions.filter((r) => r.participantId === participant.id),
     [allReactions, participant.id]
@@ -110,7 +126,7 @@ export function VideoTile({ participant, subtitle, compact, mediaStream }: Video
       const audioOnlyStream = new MediaStream(mediaStream.getAudioTracks());
       remoteAudioStreamRef.current = audioOnlyStream;
       audioRef.current.srcObject = audioOnlyStream;
-      audioRef.current.muted = false;
+      audioRef.current.muted = !remoteCanSpeak;
       audioRef.current.volume = 1;
     }
 
@@ -152,6 +168,8 @@ export function VideoTile({ participant, subtitle, compact, mediaStream }: Video
         if (audioRef.current) audioRef.current.srcObject = null;
       }
     };
+    // remoteCanSpeak is applied by its own effect; re-attaching on change is unnecessary.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [markAudioBlocked, mediaStream, participant.id]);
 
   const handleEnableAudio = async () => {

@@ -86,6 +86,135 @@ export type Database = {
         }
         Relationships: []
       }
+      meetings: {
+        Row: {
+          annotation_enabled: boolean
+          created_at: string
+          ended_at: string | null
+          host_session_id: string | null
+          host_user_id: string
+          meeting_code: string
+          remote_control_enabled: boolean
+          status: string
+          updated_at: string
+        }
+        Insert: {
+          annotation_enabled?: boolean
+          created_at?: string
+          ended_at?: string | null
+          host_session_id?: string | null
+          host_user_id: string
+          meeting_code: string
+          remote_control_enabled?: boolean
+          status?: string
+          updated_at?: string
+        }
+        Update: {
+          annotation_enabled?: boolean
+          created_at?: string
+          ended_at?: string | null
+          host_session_id?: string | null
+          host_user_id?: string
+          meeting_code?: string
+          remote_control_enabled?: boolean
+          status?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
+      meeting_participant_permissions: {
+        Row: {
+          can_annotate: boolean
+          can_request_remote_control: boolean
+          can_share_screen: boolean
+          can_speak: boolean
+          can_use_camera: boolean
+          id: string
+          meeting_code: string
+          remote_control_granted: boolean
+          session_id: string
+          updated_at: string
+          user_id: string | null
+        }
+        Insert: {
+          can_annotate?: boolean
+          can_request_remote_control?: boolean
+          can_share_screen?: boolean
+          can_speak?: boolean
+          can_use_camera?: boolean
+          id?: string
+          meeting_code: string
+          remote_control_granted?: boolean
+          session_id: string
+          updated_at?: string
+          user_id?: string | null
+        }
+        Update: {
+          can_annotate?: boolean
+          can_request_remote_control?: boolean
+          can_share_screen?: boolean
+          can_speak?: boolean
+          can_use_camera?: boolean
+          id?: string
+          meeting_code?: string
+          remote_control_granted?: boolean
+          session_id?: string
+          updated_at?: string
+          user_id?: string | null
+        }
+        Relationships: []
+      }
+      remote_control_sessions: {
+        Row: {
+          controller_session_id: string
+          controller_user_id: string | null
+          created_at: string
+          expires_at: string
+          granted_by: string
+          id: string
+          meeting_code: string
+          mode: string
+          presenter_session_id: string
+          presenter_user_id: string
+          revoke_reason: string | null
+          revoked_at: string | null
+          status: string
+          token: string
+        }
+        Insert: {
+          controller_session_id: string
+          controller_user_id?: string | null
+          created_at?: string
+          expires_at?: string
+          granted_by: string
+          id?: string
+          meeting_code: string
+          mode: string
+          presenter_session_id: string
+          presenter_user_id: string
+          revoke_reason?: string | null
+          revoked_at?: string | null
+          status?: string
+          token: string
+        }
+        Update: {
+          controller_session_id?: string
+          controller_user_id?: string | null
+          created_at?: string
+          expires_at?: string
+          granted_by?: string
+          id?: string
+          meeting_code?: string
+          mode?: string
+          presenter_session_id?: string
+          presenter_user_id?: string
+          revoke_reason?: string | null
+          revoked_at?: string | null
+          status?: string
+          token?: string
+        }
+        Relationships: []
+      }
       scheduled_meetings: {
         Row: {
           created_at: string
@@ -130,7 +259,16 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
-      [_ in never]: never
+      claim_meeting_host: { Args: { _meeting_code: string; _session_id: string }; Returns: Database["public"]["Tables"]["meetings"]["Row"] }
+      set_participant_permission: { Args: { _meeting_code: string; _session_id: string; _patch: Json }; Returns: Database["public"]["Tables"]["meeting_participant_permissions"]["Row"] }
+      set_all_participant_permissions: { Args: { _meeting_code: string; _patch: Json }; Returns: number }
+      set_meeting_controls: { Args: { _meeting_code: string; _patch: Json }; Returns: Database["public"]["Tables"]["meetings"]["Row"] }
+      grant_remote_control: { Args: { _meeting_code: string; _presenter_session_id: string; _controller_session_id: string; _mode: string }; Returns: Database["public"]["Tables"]["remote_control_sessions"]["Row"] }
+      revoke_remote_control: { Args: { _meeting_code: string; _controller_session_id: string; _reason?: string | null }; Returns: number }
+      verify_remote_control_token: { Args: { _meeting_code: string; _token: string }; Returns: Database["public"]["Tables"]["remote_control_sessions"]["Row"] | null }
+      remove_participant: { Args: { _meeting_code: string; _session_id: string }; Returns: boolean }
+      end_meeting: { Args: { _meeting_code: string }; Returns: boolean }
+      cleanup_ended_meetings: { Args: Record<string, never>; Returns: number }
     }
     Enums: {
       [_ in never]: never
