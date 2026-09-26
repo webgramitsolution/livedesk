@@ -116,6 +116,7 @@ export function RemoteControlOverlay({
   const [showSettings, setShowSettings] = useState(false);
   const [showMetrics, setShowMetrics] = useState(false);
   const [showMapping, setShowMapping] = useState(false);
+  const [showDiagnostics, setShowDiagnostics] = useState(false);
   const [mappingRows, setMappingRows] = useState<PeerMappingRow[] | null>(null);
   const [mappingLoading, setMappingLoading] = useState(false);
   const [mappingError, setMappingError] = useState<string | null>(null);
@@ -463,6 +464,17 @@ export function RemoteControlOverlay({
       <div className="absolute top-3 right-3 pointer-events-auto flex flex-col items-end gap-2">
         <div className="flex items-center gap-1">
           <button
+            onClick={() => setShowDiagnostics((v) => !v)}
+            title="Remote control diagnostics"
+            aria-label="Remote control diagnostics"
+            aria-expanded={showDiagnostics}
+            className="inline-flex h-6 w-6 items-center justify-center rounded-full border border-border bg-background/70 text-muted-foreground shadow hover:bg-muted backdrop-blur"
+          >
+            <Activity className="h-3 w-3" />
+          </button>
+          {showDiagnostics && (
+          <>
+          <button
             onClick={() => setShowMetrics((v) => !v)}
             title="Toggle live control metrics"
             className="inline-flex items-center gap-1 rounded-full border border-border bg-background/80 px-2.5 py-1 text-[10px] font-medium text-muted-foreground shadow hover:bg-muted backdrop-blur"
@@ -484,6 +496,8 @@ export function RemoteControlOverlay({
           >
             <Layers className="h-3 w-3" /> Mapping
           </button>
+          </>
+          )}
         </div>
 
         {/* Permission handshake status + exact failure reason */}
@@ -678,7 +692,7 @@ export function RemoteControlOverlay({
           shown so the presenter can grant/deny each one predictably. Granting
           one automatically denies the rest to avoid conflicts. */}
       {isLocalPresenter && requestQueue.length > 0 && (
-        <div className="absolute inset-x-0 top-3 flex justify-center pointer-events-none">
+        <div className="absolute inset-x-0 top-14 flex justify-center pointer-events-none">
           <div className="pointer-events-auto flex flex-col gap-2 rounded-2xl border border-border bg-background/95 p-3 shadow-xl backdrop-blur max-w-md w-full">
             <div className="flex items-center justify-between">
               <span className="text-sm font-semibold text-foreground">
