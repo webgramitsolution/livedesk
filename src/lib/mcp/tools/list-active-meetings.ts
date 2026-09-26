@@ -12,7 +12,7 @@ function supabaseForUser(ctx: ToolContext) {
 export default defineTool({
   name: "list_active_meeting_participants",
   title: "List active meeting participants",
-  description: "List participants currently present in a Zoom Connect meeting by meeting code.",
+  description: "List participants currently present in a LiveDesk meeting by meeting code.",
   inputSchema: {
     meeting_code: z.string().trim().min(1).describe("The meeting code to inspect."),
   },

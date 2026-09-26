@@ -6,6 +6,11 @@ import {
   type ParticipantPermission,
 } from '@/lib/permissions';
 import { SUPPORTED_LANGUAGES, type LanguageCode } from '@/lib/translation/languages';
+import { getDataBus, newMessageId } from '@/lib/dataPlane';
+
+/** Wire payloads on the `chat` and `state` topics for room-level sync. */
+export type RoomChatMessage = { kind: 'chat'; id: string; text: string; sender: string; at: number };
+export type RoomStateMessage = { type: 'hand'; raised: boolean } | { type: 'reaction'; emoji: string };
 
 export interface Participant {
   /** '1' for the local participant, otherwise the remote session id. */
@@ -193,6 +198,8 @@ interface MeetingState {
   toggleRightPanel: (panel: 'ai' | 'participants' | 'chat') => void;
   toggleHandRaise: (participantId: string) => void;
   sendChatMessage: (text: string) => void;
+  receiveChatMessage: (message: RoomChatMessage, fromSessionId: string) => void;
+  setRemoteHandRaised: (sessionId: string, raised: boolean) => void;
   sendReaction: (emoji: string, participantId: string) => void;
   removeReaction: (reactionId: string) => void;
   setSelectedLanguage: (lang: string) => void;
@@ -451,34 +458,81 @@ export const useMeetingStore = create<MeetingState>((set, get) => ({
       rightPanel: s.rightPanel === panel ? null : panel,
       unreadChats: panel === 'chat' ? 0 : s.unreadChats,
     })),
-  toggleHandRaise: (participantId) =>
+  toggleHandRaise: (participantId) => {
+    const target = get().participants.find((p) => p.id === participantId);
+    const raised = !(target?.handRaised ?? false);
     set((s) => ({
       participants: s.participants.map((p) =>
-        p.id === participantId
-          ? { ...p, handRaised: !p.handRaised, handRaisedAt: !p.handRaised ? Date.now() : null }
-          : p
+        p.id === participantId ? { ...p, handRaised: raised, handRaisedAt: raised ? Date.now() : null } : p,
       ),
-    })),
-  sendChatMessage: (text) =>
+    }));
+    if (participantId === '1') {
+      try {
+        getDataBus().publish('state', { type: 'hand', raised } satisfies RoomStateMessage);
+      } catch {
+        /* not connected yet */
+      }
+    }
+  },
+  sendChatMessage: (text) => {
+    const message: RoomChatMessage = { kind: 'chat', id: newMessageId(), text, sender: get().userName || 'You', at: Date.now() };
     set((s) => ({
       chatMessages: [
         ...s.chatMessages,
         {
-          id: String(Date.now()),
+          id: message.id,
           sender: 'You',
           text,
-          timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+          timestamp: new Date(message.at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
           isOwn: true,
         },
       ],
+    }));
+    try {
+      getDataBus().publish('chat', message, { id: message.id });
+    } catch {
+      /* not connected yet; message stays local */
+    }
+  },
+  receiveChatMessage: (message, fromSessionId) =>
+    set((s) => {
+      if (s.chatMessages.some((m) => m.id === message.id)) return {};
+      const sender = s.participants.find((p) => p.sessionId === fromSessionId)?.name ?? message.sender;
+      return {
+        chatMessages: [
+          ...s.chatMessages,
+          {
+            id: message.id,
+            sender,
+            text: message.text,
+            timestamp: new Date(message.at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+            isOwn: false,
+          },
+        ],
+        unreadChats: s.rightPanel === 'chat' ? 0 : s.unreadChats + 1,
+      };
+    }),
+  setRemoteHandRaised: (sessionId, raised) =>
+    set((s) => ({
+      participants: s.participants.map((p) =>
+        p.sessionId === sessionId && p.id !== '1' ? { ...p, handRaised: raised, handRaisedAt: raised ? Date.now() : null } : p,
+      ),
     })),
-  sendReaction: (emoji, participantId) =>
+  sendReaction: (emoji, participantId) => {
     set((s) => ({
       reactions: [
         ...s.reactions,
         { id: String(Date.now()) + Math.random(), emoji, participantId, createdAt: Date.now() },
       ],
-    })),
+    }));
+    if (participantId === '1') {
+      try {
+        getDataBus().publish('state', { type: 'reaction', emoji } satisfies RoomStateMessage);
+      } catch {
+        /* ignore */
+      }
+    }
+  },
   removeReaction: (reactionId) =>
     set((s) => ({ reactions: s.reactions.filter((r) => r.id !== reactionId) })),
   setSelectedLanguage: (selectedLanguage) => set({ selectedLanguage }),
@@ -632,6 +686,9 @@ export const useMeetingStore = create<MeetingState>((set, get) => ({
         if (url.searchParams.has('meeting')) {
           url.searchParams.delete('meeting');
           window.history.replaceState({}, '', url.pathname + (url.search ? url.search : ''));
+        }
+        if (url.pathname === '/') {
+          window.history.replaceState({}, '', '/app');
         }
       } catch {
       /* audio feedback is best-effort */

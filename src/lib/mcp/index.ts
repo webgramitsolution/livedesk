@@ -10,10 +10,10 @@ const projectRef = import.meta.env.VITE_SUPABASE_PROJECT_ID ?? "project-ref-unse
 
 export default defineMcp({
   name: "zoom-connect-mcp",
-  title: "Zoom Connect",
+  title: "LiveDesk",
   version: "0.1.0",
   instructions:
-    "Tools for Zoom Connect. Use `list_scheduled_meetings` to see the signed-in user's upcoming meetings, `create_scheduled_meeting` to schedule one, and `list_active_meeting_participants` to see who is currently in a meeting.",
+    "Tools for LiveDesk. Use `list_scheduled_meetings` to see the signed-in user's upcoming meetings, `create_scheduled_meeting` to schedule one, and `list_active_meeting_participants` to see who is currently in a meeting.",
   auth: auth.oauth.issuer({
     issuer: `https://${projectRef}.supabase.co/auth/v1`,
     acceptedAudiences: "authenticated",

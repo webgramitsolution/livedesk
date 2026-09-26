@@ -16,6 +16,8 @@ import { AlignmentDebugOverlay } from './AlignmentDebugOverlay';
 import { MobileSubmenus } from './MobileSubmenus';
 import { MediaDiagnosticsPanel } from './MediaDiagnosticsPanel';
 import { ElectronSourcePicker } from './ElectronSourcePicker';
+import { RoomSync } from './RoomSync';
+import { ConnectionBanner } from './ConnectionBanner';
 import { useSwipeGesture } from '@/hooks/useSwipeGesture';
 import { useIsMobile } from '@/hooks/use-mobile';
 import { useWebRTC } from '@/hooks/useWebRTC';
@@ -43,13 +45,17 @@ export function MeetingRoom() {
 
   // Mirror the media-plane connection state into the central session state
   // so the top bar and participant panel show real connection status.
+  const hostSessionId = useMeetingStore((s) => s.session.hostSessionId);
+  const meetingSessionId = useMeetingStore((s) => s.meetingSessionId);
   useEffect(() => {
     const states: Record<string, string> = {};
     peerStates.forEach((state, peerId) => {
       states[peerId] = state;
     });
-    setSession({ peerConnectionStates: states, connectionState: connectionSummary });
-  }, [peerStates, connectionSummary, setSession]);
+    const hostState = hostSessionId && hostSessionId !== meetingSessionId ? states[hostSessionId] : undefined;
+    const hostDown = hostState === 'disconnected' || hostState === 'failed';
+    setSession({ peerConnectionStates: states, connectionState: hostDown ? 'host-disconnected' : connectionSummary });
+  }, [peerStates, connectionSummary, setSession, hostSessionId, meetingSessionId]);
 
   const PANEL_CYCLE: Array<'ai' | 'participants' | 'chat'> = ['ai', 'participants', 'chat'];
   useSwipeGesture(videoAreaRef, {
@@ -172,7 +178,9 @@ export function MeetingRoom() {
   return (
     <div className="h-screen flex flex-col bg-background overflow-hidden">
       <MeetingPresenceManager />
+      <RoomSync />
       <NavigationBar />
+      <ConnectionBanner />
       <div className="flex-1 flex overflow-hidden">
         <div ref={videoAreaRef} className="flex-1 relative flex flex-col min-w-0">
           <VideoGrid localStream={processedLocalStream} remoteStreams={remoteStreams} screenStream={screenStream} remoteScreenStream={remoteScreenStream} remoteScreenPeerId={remoteScreenPeerId} getDiagnosticsSnapshot={getDiagnosticsSnapshot} />

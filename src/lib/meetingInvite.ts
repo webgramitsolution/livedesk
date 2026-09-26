@@ -26,8 +26,8 @@ export function extractMeetingCodeFromInput(value: string | null | undefined) {
 export function buildMeetingLink(meetingCode: string) {
   const encodedCode = encodeURIComponent(meetingCode);
   return typeof window === 'undefined'
-    ? `/?meeting=${encodedCode}`
-    : `${window.location.origin}?meeting=${encodedCode}`;
+    ? `/app?meeting=${encodedCode}`
+    : `${window.location.origin}/app?meeting=${encodedCode}`;
 }
 
 export function storePendingMeetingCode(meetingCode: string) {

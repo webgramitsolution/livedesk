@@ -113,7 +113,7 @@ export function LobbyScreen() {
       if (meetingParam) {
         storePendingMeetingCode(meetingParam);
       }
-      const redirect = meetingParam ? encodeURIComponent(`/?meeting=${meetingParam}`) : encodeURIComponent('/');
+      const redirect = meetingParam ? encodeURIComponent(`/app?meeting=${meetingParam}`) : encodeURIComponent('/app');
       navigate(`/auth?redirect=${redirect}`);
     };
 
@@ -255,7 +255,7 @@ export function LobbyScreen() {
               Video calls and meetings for everyone
             </h1>
             <p className="text-muted-foreground mt-3 text-sm sm:text-base">
-              Connect, collaborate and celebrate from anywhere with Zoom Connect
+              Meet, share your screen, annotate together and support remotely, all in one workspace.
             </p>
           </div>
 
