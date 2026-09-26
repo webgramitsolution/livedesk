@@ -1159,8 +1159,9 @@ export function useWebRTC(meetingId: string, isInMeeting: boolean) {
       screenStreamRef.current?.getTracks().forEach((t) => t.stop());
       screenStreamRef.current = null;
       setScreenStream(null);
-      localMediaRetryTimersRef.current.audio && clearTimeout(localMediaRetryTimersRef.current.audio);
-      localMediaRetryTimersRef.current.video && clearTimeout(localMediaRetryTimersRef.current.video);
+      const retryTimers = localMediaRetryTimersRef.current;
+      if (retryTimers.audio) clearTimeout(retryTimers.audio);
+      if (retryTimers.video) clearTimeout(retryTimers.video);
     };
   }, [isInMeeting, mergeRawLocalTracks, scheduleLocalMediaRetry, setCameraOn, setLocalMediaStatus, setMicOn, updateLocalMediaStatusFromStream]);
 

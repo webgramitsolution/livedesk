@@ -413,7 +413,9 @@ export const useMeetingStore = create<MeetingState>((set) => ({
       gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.3);
       osc.start(ctx.currentTime);
       osc.stop(ctx.currentTime + 0.3);
-    } catch {}
+    } catch {
+      /* audio feedback is best-effort */
+    }
   },
   addSimulatedParticipant: (name) =>
     set((s) => {
@@ -430,7 +432,9 @@ export const useMeetingStore = create<MeetingState>((set) => ({
         gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.25);
         osc.start(ctx.currentTime);
         osc.stop(ctx.currentTime + 0.25);
-      } catch {}
+      } catch {
+      /* audio feedback is best-effort */
+    }
       const newId = `p-${Date.now()}`;
       return {
         participants: [
@@ -460,7 +464,9 @@ export const useMeetingStore = create<MeetingState>((set) => ({
           url.searchParams.delete('meeting');
           window.history.replaceState({}, '', url.pathname + (url.search ? url.search : ''));
         }
-      } catch {}
+      } catch {
+      /* audio feedback is best-effort */
+    }
     }
     set({
       screen: 'lobby',

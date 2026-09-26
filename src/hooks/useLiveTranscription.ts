@@ -59,9 +59,10 @@ export function useLiveTranscription() {
     }
   };
 
+  type ScribeOptions = Parameters<typeof useScribe>[0];
   const scribe = useScribe({
-    modelId: 'scribe_v2_realtime' as any,
-    commitStrategy: 'vad' as any,
+    modelId: 'scribe_v2_realtime' as ScribeOptions['modelId'],
+    commitStrategy: 'vad' as ScribeOptions['commitStrategy'],
     onPartialTranscript: (data) => {
       if (data.text.trim() && partialStartRef.current === 0) {
         partialStartRef.current = Date.now();
