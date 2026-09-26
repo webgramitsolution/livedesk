@@ -6,28 +6,36 @@ import { toast } from 'sonner';
 import { logWebRTCEvent } from '@/lib/webrtcLogger';
 import { requestMeetingMedia, takePreflightStream, type MediaErrorReason } from '@/lib/mediaPreflight';
 import { recoverRemoteAudioPlayback } from '@/lib/remoteAudioRecovery';
+import { getDataBus, type DataEnvelope } from '@/lib/dataPlane';
+import { buildIceConfiguration, createSignaling, isLocalSignalingEnabled, type SignalingTransport } from '@/lib/signaling';
 
-const ICE_SERVERS: RTCConfiguration = {
-  iceServers: [
-    { urls: 'stun:stun.l.google.com:19302' },
-    { urls: 'stun:stun1.l.google.com:19302' },
-    {
-      urls: 'turn:openrelay.metered.ca:80',
-      username: 'openrelayproject',
-      credential: 'openrelayproject',
-    },
-    {
-      urls: 'turn:openrelay.metered.ca:443',
-      username: 'openrelayproject',
-      credential: 'openrelayproject',
-    },
-    {
-      urls: 'turn:openrelay.metered.ca:443?transport=tcp',
-      username: 'openrelayproject',
-      credential: 'openrelayproject',
-    },
-  ],
-};
+// Public open-relay TURN used only when no VITE_TURN_* configuration exists.
+// Configure your own relay for production (see .env.example).
+const DEV_FALLBACK_TURN: RTCIceServer[] = [
+  { urls: ['turn:openrelay.metered.ca:80', 'turn:openrelay.metered.ca:443', 'turn:openrelay.metered.ca:443?transport=tcp'], username: 'openrelayproject', credential: 'openrelayproject' },
+];
+
+function iceConfiguration(): RTCConfiguration {
+  const config = buildIceConfiguration();
+  const hasTurn = config.iceServers?.some((s) => (Array.isArray(s.urls) ? s.urls : [s.urls]).some((u) => u.startsWith('turn')));
+  if (!hasTurn) {
+    return { iceServers: [...(config.iceServers ?? []), ...DEV_FALLBACK_TURN] };
+  }
+  return config;
+}
+
+// Both sides create the same negotiated channel so it is available without
+// an extra offer/answer round and regardless of who initiated the connection.
+const DATA_CHANNEL_LABEL = 'livedesk';
+const DATA_CHANNEL_ID = 0;
+
+export type PeerConnectionSummary = 'connecting' | 'connected' | 'reconnecting' | 'failed';
+
+/** Announced by a presenter so receivers can route the screen stream by id instead of guessing. */
+interface ScreenShareAnnouncement {
+  type: 'screen-share';
+  streamId: string | null;
+}
 
 interface PeerConnection {
   pc: RTCPeerConnection;
@@ -71,7 +79,12 @@ export function useWebRTC(meetingId: string, isInMeeting: boolean) {
   const rawLocalStreamRef = useRef<MediaStream | null>(null);
   const screenStreamRef = useRef<MediaStream | null>(null);
   const peersRef = useRef<Map<string, PeerConnection>>(new Map());
-  const channelRef = useRef<ReturnType<typeof supabase.channel> | null>(null);
+  const signalingRef = useRef<SignalingTransport | null>(null);
+  const signalingReadyRef = useRef(false);
+  const remoteScreenStreamIdRef = useRef<Map<string, string | null>>(new Map());
+  const remoteStreamsByPeerRef = useRef<Map<string, Map<string, MediaStream>>>(new Map());
+  const [peerStates, setPeerStates] = useState<Map<string, RTCPeerConnectionState>>(new Map());
+  const [signalingStatus, setSignalingStatus] = useState<'idle' | 'connecting' | 'subscribed' | 'closed' | 'error'>('idle');
   const noiseCancellationCleanupRef = useRef<(() => void) | null>(null);
   const mediaAcquireInFlightRef = useRef(false);
   const makingOfferRef = useRef<Map<string, boolean>>(new Map());
@@ -131,6 +144,7 @@ export function useWebRTC(meetingId: string, isInMeeting: boolean) {
 
   const ensurePresenceReady = useCallback(async () => {
     if (!meetingId || !meetingSessionId) return false;
+    if (isLocalSignalingEnabled()) return true;
 
     const db = supabase as typeof supabase & {
       from: (table: string) => {
@@ -360,7 +374,7 @@ export function useWebRTC(meetingId: string, isInMeeting: boolean) {
         return existing.pc;
       }
 
-      const pc = new RTCPeerConnection(ICE_SERVERS);
+      const pc = new RTCPeerConnection(iceConfiguration());
 
       const localStream = localStreamRef.current;
       const localAudioTracks = localStream?.getAudioTracks() ?? [];
@@ -387,19 +401,23 @@ export function useWebRTC(meetingId: string, isInMeeting: boolean) {
       }
 
       pc.onicecandidate = (event) => {
-        if (event.candidate && channelRef.current) {
+        if (event.candidate && signalingRef.current) {
           logWebRTCEvent('ice', 'local-candidate', { type: event.candidate.type }, peerId);
-          channelRef.current.send({
-            type: 'broadcast',
-            event: 'ice-candidate',
-            payload: {
-              candidate: event.candidate.toJSON(),
-              from: myPeerIdRef.current,
-              to: peerId,
-            },
+          signalingRef.current.send('ice-candidate', {
+            candidate: event.candidate.toJSON(),
+            from: myPeerIdRef.current,
+            to: peerId,
           });
         }
       };
+
+      // Data plane: negotiated channel bound to this peer.
+      try {
+        const dc = pc.createDataChannel(DATA_CHANNEL_LABEL, { negotiated: true, id: DATA_CHANNEL_ID, ordered: true });
+        getDataBus().attachPeer(peerId, dc);
+      } catch (err) {
+        logWebRTCEvent('error', 'data-channel-create-failed', { reason: String(err) }, peerId);
+      }
 
       pc.ontrack = (event) => {
         const track = event.track;
@@ -414,7 +432,21 @@ export function useWebRTC(meetingId: string, isInMeeting: boolean) {
           .getReceivers()
           .filter((receiver) => receiver.track?.kind === 'video').length;
 
-        if (incomingStream && (videoReceiverCount > 1 || isLikelyScreenTrack(track))) {
+        if (incomingStream) {
+          let byPeer = remoteStreamsByPeerRef.current.get(peerId);
+          if (!byPeer) {
+            byPeer = new Map();
+            remoteStreamsByPeerRef.current.set(peerId, byPeer);
+          }
+          byPeer.set(incomingStream.id, incomingStream);
+        }
+
+        const announcedScreenId = remoteScreenStreamIdRef.current.get(peerId);
+        const isAnnouncedScreen = !!incomingStream && !!announcedScreenId && incomingStream.id === announcedScreenId;
+        const isAnnouncedCamera = !!incomingStream && announcedScreenId !== undefined && announcedScreenId !== null && incomingStream.id !== announcedScreenId;
+        const heuristicScreen = track.kind === 'video' && (videoReceiverCount > 1 || isLikelyScreenTrack(track));
+
+        if (incomingStream && (isAnnouncedScreen || (!isAnnouncedCamera && heuristicScreen))) {
           remoteScreenByPeerRef.current.set(peerId, incomingStream);
           setRemoteScreenPeerId(peerId);
           setRemoteScreenStream(incomingStream);
@@ -442,6 +474,11 @@ export function useWebRTC(meetingId: string, isInMeeting: boolean) {
 
       pc.onconnectionstatechange = () => {
         logWebRTCEvent('peer', 'connection-state', { state: pc.connectionState }, peerId);
+        setPeerStates((prev) => {
+          const next = new Map(prev);
+          next.set(peerId, pc.connectionState);
+          return next;
+        });
         if (pc.connectionState === 'disconnected' || pc.connectionState === 'failed') {
           schedulePeerRestartRef.current(peerId, `connection-${pc.connectionState}`);
         } else if (pc.connectionState === 'connected') {
@@ -491,14 +528,10 @@ export function useWebRTC(meetingId: string, isInMeeting: boolean) {
       setLastRenegotiationAt();
 
       logWebRTCEvent('signal', 'send-answer', undefined, from);
-      channelRef.current?.send({
-        type: 'broadcast',
-        event: 'answer',
-        payload: {
-          answer: answer,
-          from: myPeerIdRef.current,
-          to: from,
-        },
+      signalingRef.current?.send('answer', {
+        answer: answer,
+        from: myPeerIdRef.current,
+        to: from,
       });
     },
     [createPeerConnection, isPolitePeer, setLastRenegotiationAt]
@@ -551,14 +584,10 @@ export function useWebRTC(meetingId: string, isInMeeting: boolean) {
         lastRenegotiationReasonRef.current.set(peerId, reason);
 
         logWebRTCEvent('signal', 'send-offer', { reason }, peerId);
-        channelRef.current?.send({
-          type: 'broadcast',
-          event: 'offer',
-          payload: {
-            offer,
-            from: myPeerIdRef.current,
-            to: peerId,
-          },
+        signalingRef.current?.send('offer', {
+          offer,
+          from: myPeerIdRef.current,
+          to: peerId,
         });
       } finally {
         makingOfferRef.current.set(peerId, false);
@@ -646,9 +675,11 @@ export function useWebRTC(meetingId: string, isInMeeting: boolean) {
         }
       }
 
+      getDataBus().detachPeer(peerId);
       peersRef.current.delete(peerId);
       retryStateRef.current.delete(peerId);
       makingOfferRef.current.delete(peerId);
+      remoteStreamsByPeerRef.current.delete(peerId);
       updateRemoteStreams();
       void sendOfferToPeer(peerId);
     }, delay);
@@ -659,6 +690,16 @@ export function useWebRTC(meetingId: string, isInMeeting: boolean) {
   useEffect(() => {
     schedulePeerRestartRef.current = schedulePeerRestart;
   }, [schedulePeerRestart]);
+
+  // Tell every peer which outgoing stream id carries the screen (null = stopped).
+  const announceScreenShare = useCallback((streamId: string | null) => {
+    const payload: ScreenShareAnnouncement = { type: 'screen-share', streamId };
+    try {
+      getDataBus().publish('sys', payload);
+    } catch {
+      /* bus not ready yet; re-announced on channel open */
+    }
+  }, []);
 
   // Start screen sharing
   const startScreenShare = useCallback(async () => {
@@ -692,16 +733,11 @@ export function useWebRTC(meetingId: string, isInMeeting: boolean) {
         );
       }
 
-      // Mute local playback of screen share audio to prevent feedback loop
-      stream.getAudioTracks().forEach((track) => {
-        // The track is still sent to peers, but we prevent local echo
-        const clonedTrack = track.clone();
-        clonedTrack.enabled = true;
-        // Replace the original audio track with a cloned one for peers
-      });
-
+      // Local playback of the shared screen is muted at the <video> element
+      // (see ScreenShareVideo); the audio track itself is sent to peers.
       screenStreamRef.current = stream;
       setScreenStream(stream);
+      announceScreenShare(stream.id);
 
       // Add screen tracks to all existing peer connections
       peersRef.current.forEach((peer) => {
@@ -730,7 +766,7 @@ export function useWebRTC(meetingId: string, isInMeeting: boolean) {
         toggleScreenShare();
       }
     }
-  }, [sendOfferToPeer, toggleScreenShare]);
+  }, [announceScreenShare, sendOfferToPeer, toggleScreenShare]);
 
   const stopScreenShare = useCallback(() => {
     if (screenStreamRef.current) {
@@ -749,13 +785,14 @@ export function useWebRTC(meetingId: string, isInMeeting: boolean) {
       screenStreamRef.current = null;
       setScreenStream(null);
       setSelfCapture(false);
+      announceScreenShare(null);
 
       // Renegotiate
       peersRef.current.forEach((peer) => {
         sendOfferToPeer(peer.peerId);
       });
     }
-  }, [sendOfferToPeer]);
+  }, [announceScreenShare, sendOfferToPeer]);
 
   // Sync screen sharing toggle from store
   useEffect(() => {
@@ -1202,21 +1239,40 @@ export function useWebRTC(meetingId: string, isInMeeting: boolean) {
     }
   }, [acquireMissingLocalMedia, isCameraOn, setLocalMediaStatus]);
 
-  // Setup signaling channel
+  // Apply a screen-share announcement from a peer: route the named stream to
+  // the screen slot (or clear it) using streams we have already received.
+  const applyScreenAnnouncement = useCallback((peerId: string, streamId: string | null) => {
+    remoteScreenStreamIdRef.current.set(peerId, streamId);
+    const byPeer = remoteStreamsByPeerRef.current.get(peerId);
+    if (streamId) {
+      const stream = byPeer?.get(streamId);
+      if (stream) {
+        remoteScreenByPeerRef.current.set(peerId, stream);
+        setRemoteScreenPeerId(peerId);
+        setRemoteScreenStream(stream);
+      }
+    } else {
+      const previous = remoteScreenByPeerRef.current.get(peerId) ?? null;
+      remoteScreenByPeerRef.current.delete(peerId);
+      setRemoteScreenPeerId((current) => (current === peerId ? null : current));
+      setRemoteScreenStream((current) => (current === previous ? null : current));
+    }
+    updateRemoteStreams();
+  }, [updateRemoteStreams]);
+
+  // Setup signaling + data plane
   useEffect(() => {
     if (!isInMeeting || !meetingId || !meetingSessionId) return;
 
     let cancelled = false;
     let joinTimers: ReturnType<typeof setTimeout>[] = [];
-    let channel: ReturnType<typeof supabase.channel> | null = null;
+    let signaling: SignalingTransport | null = null;
+    const bus = getDataBus();
+    bus.setLocalId(myPeerIdRef.current);
 
     const sendJoinAnnouncement = () => {
-      if (!channel || cancelled) return;
-      channel.send({
-        type: 'broadcast',
-        event: 'join',
-        payload: { peerId: myPeerIdRef.current },
-      });
+      if (!signaling || cancelled || !signalingReadyRef.current) return;
+      signaling.send('join', { peerId: myPeerIdRef.current });
       logWebRTCEvent('signal', 'send-join');
     };
 
@@ -1235,63 +1291,99 @@ export function useWebRTC(meetingId: string, isInMeeting: boolean) {
     window.addEventListener('online', onOnline);
     document.addEventListener('visibilitychange', onVisibility);
 
+    // Data plane fallback path rides on the signaling transport.
+    bus.setFallback((envelope: DataEnvelope) => {
+      signaling?.send('data', envelope);
+    });
+    const unsubscribeSys = bus.subscribe<ScreenShareAnnouncement>('sys', (payload, ctx) => {
+      if (payload?.type === 'screen-share') {
+        applyScreenAnnouncement(ctx.from, typeof payload.streamId === 'string' ? payload.streamId : null);
+      }
+    });
+    // Late joiners learn the current screen stream when their channel opens.
+    const unsubscribeChannel = bus.onPeerChannel((event) => {
+      if (event.state === 'open' && screenStreamRef.current) {
+        try {
+          bus.publish('sys', { type: 'screen-share', streamId: screenStreamRef.current.id } as ScreenShareAnnouncement, { to: event.peerId });
+        } catch {
+          /* ignore */
+        }
+      }
+    });
+
     void (async () => {
       const ready = await ensurePresenceReady();
       if (!ready || cancelled) return;
 
-      channel = supabase.channel(`webrtc-${meetingId}`, {
-        config: { broadcast: { self: false } },
+      signaling = createSignaling(meetingId);
+      signalingRef.current = signaling;
+
+      signaling.on('join', (raw) => {
+        const payload = raw as { peerId?: string };
+        logWebRTCEvent('signal', 'recv-join', { from: payload.peerId });
+        if (payload.peerId && payload.peerId !== myPeerIdRef.current) {
+          void sendOfferToPeer(payload.peerId);
+        }
+      });
+      signaling.on('offer', (raw) => {
+        const payload = raw as { to?: string; from: string; offer: RTCSessionDescriptionInit };
+        if (payload.to === myPeerIdRef.current) {
+          logWebRTCEvent('signal', 'recv-offer', undefined, payload.from);
+          void handleOffer(payload.from, payload.offer);
+        }
+      });
+      signaling.on('answer', (raw) => {
+        const payload = raw as { to?: string; from: string; answer: RTCSessionDescriptionInit };
+        if (payload.to === myPeerIdRef.current) {
+          logWebRTCEvent('signal', 'recv-answer', undefined, payload.from);
+          void handleAnswer(payload.from, payload.answer);
+        }
+      });
+      signaling.on('ice-candidate', (raw) => {
+        const payload = raw as { to?: string; from: string; candidate: RTCIceCandidateInit };
+        if (payload.to === myPeerIdRef.current) {
+          void handleIceCandidate(payload.from, payload.candidate);
+        }
+      });
+      signaling.on('data', (raw) => {
+        bus.ingest(raw, 'fallback');
+      });
+      signaling.on('leave', (raw) => {
+        const payload = raw as { peerId?: string };
+        logWebRTCEvent('signal', 'recv-leave', undefined, payload.peerId);
+        const leavingPeerId = String(payload.peerId);
+        const peer = peersRef.current.get(leavingPeerId);
+        if (peer) {
+          const leavingScreenStream = remoteScreenByPeerRef.current.get(leavingPeerId) ?? null;
+          bus.detachPeer(leavingPeerId);
+          peer.pc.close();
+          peersRef.current.delete(leavingPeerId);
+          remoteScreenByPeerRef.current.delete(leavingPeerId);
+          remoteStreamsByPeerRef.current.delete(leavingPeerId);
+          remoteScreenStreamIdRef.current.delete(leavingPeerId);
+          setPeerStates((prev) => {
+            const next = new Map(prev);
+            next.delete(leavingPeerId);
+            return next;
+          });
+          updateRemoteStreams();
+          setRemoteScreenPeerId((current) => (current === leavingPeerId ? null : current));
+          setRemoteScreenStream((current) => (current === leavingScreenStream ? null : current));
+        }
       });
 
-      channelRef.current = channel;
-
-      channel
-        .on('broadcast', { event: 'join' }, ({ payload }) => {
-          logWebRTCEvent('signal', 'recv-join', { from: payload.peerId });
-          if (payload.peerId !== myPeerIdRef.current) {
-            void sendOfferToPeer(payload.peerId);
-          }
-        })
-        .on('broadcast', { event: 'offer' }, ({ payload }) => {
-          if (payload.to === myPeerIdRef.current) {
-            logWebRTCEvent('signal', 'recv-offer', undefined, payload.from);
-            void handleOffer(payload.from, payload.offer);
-          }
-        })
-        .on('broadcast', { event: 'answer' }, ({ payload }) => {
-          if (payload.to === myPeerIdRef.current) {
-            logWebRTCEvent('signal', 'recv-answer', undefined, payload.from);
-            void handleAnswer(payload.from, payload.answer);
-          }
-        })
-        .on('broadcast', { event: 'ice-candidate' }, ({ payload }) => {
-          if (payload.to === myPeerIdRef.current) {
-            void handleIceCandidate(payload.from, payload.candidate);
-          }
-        })
-        .on('broadcast', { event: 'leave' }, ({ payload }) => {
-          logWebRTCEvent('signal', 'recv-leave', undefined, payload.peerId);
-          const peer = peersRef.current.get(payload.peerId);
-          if (peer) {
-            const leavingPeerId = String(payload.peerId);
-            const leavingScreenStream = remoteScreenByPeerRef.current.get(leavingPeerId) ?? null;
-            peer.pc.close();
-            peersRef.current.delete(leavingPeerId);
-            remoteScreenByPeerRef.current.delete(leavingPeerId);
-            updateRemoteStreams();
-            setRemoteScreenPeerId((current) => (current === leavingPeerId ? null : current));
-            setRemoteScreenStream((current) => (current === leavingScreenStream ? null : current));
-          }
-        })
-        .subscribe((status) => {
-          logWebRTCEvent('signal', 'channel-status', { status });
-          if (status === 'SUBSCRIBED') {
-            sendJoinAnnouncement();
-            joinTimers = [700, 1500, 3000].map((delay) => setTimeout(sendJoinAnnouncement, delay));
-          } else if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT' || status === 'CLOSED') {
-            setTimeout(() => rerunRenegotiation(`channel-${status.toLowerCase()}`), 1000);
-          }
-        });
+      signaling.connect((status) => {
+        logWebRTCEvent('signal', 'channel-status', { status });
+        setSignalingStatus(status);
+        if (status === 'subscribed') {
+          signalingReadyRef.current = true;
+          sendJoinAnnouncement();
+          joinTimers = [700, 1500, 3000].map((delay) => setTimeout(sendJoinAnnouncement, delay));
+        } else if (status === 'error' || status === 'closed') {
+          signalingReadyRef.current = false;
+          setTimeout(() => rerunRenegotiation(`channel-${status}`), 1000);
+        }
+      });
     })();
 
     return () => {
@@ -1299,29 +1391,46 @@ export function useWebRTC(meetingId: string, isInMeeting: boolean) {
       joinTimers.forEach((timer) => clearTimeout(timer));
       window.removeEventListener('online', onOnline);
       document.removeEventListener('visibilitychange', onVisibility);
+      unsubscribeSys();
+      unsubscribeChannel();
 
-      channel?.send({
-        type: 'broadcast',
-        event: 'leave',
-        payload: { peerId: myPeerIdRef.current },
+      signaling?.send('leave', { peerId: myPeerIdRef.current });
+
+      const peers = peersRef.current;
+      peers.forEach((peer) => {
+        bus.detachPeer(peer.peerId);
+        peer.pc.close();
       });
-
-      peersRef.current.forEach((peer) => peer.pc.close());
-      peersRef.current.clear();
+      peers.clear();
       makingOfferRef.current.clear();
       retryStateRef.current.forEach((retry) => retry.timer && clearTimeout(retry.timer));
       retryStateRef.current.clear();
       peerRestartStateRef.current.forEach((restart) => restart.timer && clearTimeout(restart.timer));
       peerRestartStateRef.current.clear();
+      remoteStreamsByPeerRef.current.clear();
+      remoteScreenStreamIdRef.current.clear();
       setRemoteStreams(new Map());
+      setPeerStates(new Map());
       remoteScreenByPeerRef.current.clear();
       setRemoteScreenPeerId(null);
       setRemoteScreenStream(null);
+      bus.setFallback(null);
 
-      if (channel) supabase.removeChannel(channel);
-      channelRef.current = null;
+      signaling?.close();
+      signalingRef.current = null;
+      signalingReadyRef.current = false;
+      setSignalingStatus('idle');
     };
-  }, [ensurePresenceReady, handleAnswer, handleIceCandidate, handleOffer, isInMeeting, meetingId, meetingSessionId, sendOfferToPeer, updateRemoteStreams]);
+  }, [applyScreenAnnouncement, ensurePresenceReady, handleAnswer, handleIceCandidate, handleOffer, isInMeeting, meetingId, meetingSessionId, sendOfferToPeer, updateRemoteStreams]);
+
+  const connectionSummary: PeerConnectionSummary = (() => {
+    if (peerStates.size === 0) return signalingStatus === 'subscribed' ? 'connected' : signalingStatus === 'error' ? 'failed' : 'connecting';
+    const states = Array.from(peerStates.values());
+    if (states.some((st) => st === 'failed')) return 'failed';
+    if (states.some((st) => st === 'disconnected')) return 'reconnecting';
+    if (states.every((st) => st === 'connected')) return 'connected';
+    return 'connecting';
+  })();
 
   return {
     localStream,
@@ -1330,6 +1439,9 @@ export function useWebRTC(meetingId: string, isInMeeting: boolean) {
     remoteScreenStream,
     remoteScreenPeerId,
     myPeerId: myPeerIdRef.current,
+    peerStates,
+    signalingStatus,
+    connectionSummary,
     getPeerStats,
     getPeerDiagnostics,
     getDiagnosticsSnapshot,
