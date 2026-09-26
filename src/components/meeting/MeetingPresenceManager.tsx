@@ -216,23 +216,23 @@ export function MeetingPresenceManager() {
     };
 
     const bootstrap = async () => {
-      const { data: authData } = await supabase.auth.getSession();
-      const session = authData.session;
-      if (!session || !active) {
-        if (isLocalSignalingEnabled()) {
-          // Local test mode without a backend: the tab tagged as host (or the
-          // first tab) acts as host; others are members.
-          const role = window.sessionStorage.getItem('livedesk-e2e-role') ?? 'host';
-          const hostSession = window.sessionStorage.getItem('livedesk-e2e-host-session') ?? localSessionId;
-          useMeetingStore.getState().setSession({
-            myUserId: role === 'host' ? 'local-host' : `local-${localSessionId}`,
-            hostUserId: 'local-host',
-            hostSessionId: hostSession,
-            meetingStatus: 'active',
-          });
-        }
+      if (isLocalSignalingEnabled()) {
+        // Local test mode without a backend: no auth or presence rows. The tab
+        // tagged as host (or the first tab) acts as host; others are members.
+        const role = window.sessionStorage.getItem('livedesk-e2e-role') ?? 'host';
+        const hostSession = window.sessionStorage.getItem('livedesk-e2e-host-session') ?? localSessionId;
+        useMeetingStore.getState().setSession({
+          myUserId: role === 'host' ? 'local-host' : `local-${localSessionId}`,
+          hostUserId: 'local-host',
+          hostSessionId: hostSession,
+          meetingStatus: 'active',
+          hasBackend: false,
+        });
         return;
       }
+      const { data: authData } = await supabase.auth.getSession();
+      const session = authData.session;
+      if (!session || !active) return;
 
       const displayName = userName || session.user.email?.split('@')[0] || 'You';
       const { isMicOn: currentMicState, isCameraOn: currentCameraState } = useMeetingStore.getState();
@@ -324,7 +324,7 @@ export function MeetingPresenceManager() {
       previousRemoteIdsRef.current = [];
       if (presenceChannel) supabase.removeChannel(presenceChannel);
       if (sessionChannel) supabase.removeChannel(sessionChannel);
-      void db().from(TABLE).delete().eq('session_id', localSessionId);
+      if (!isLocalSignalingEnabled()) void db().from(TABLE).delete().eq('session_id', localSessionId);
     };
   }, [localSessionId, meetingId, screen, userName]);
 
@@ -341,7 +341,7 @@ export function MeetingPresenceManager() {
       ),
     });
 
-    void db().from(TABLE).update({ is_mic_on: isMicOn, is_camera_on: isCameraOn }).eq('session_id', localSessionId);
+    if (!isLocalSignalingEnabled()) void db().from(TABLE).update({ is_mic_on: isMicOn, is_camera_on: isCameraOn }).eq('session_id', localSessionId);
   }, [isCameraOn, isMicOn, localSessionId, meetingId, screen]);
 
   // Local enforcement: when the host removes a capability, apply it to the

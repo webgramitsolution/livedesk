@@ -286,7 +286,7 @@ test.describe('LiveDesk real media', () => {
         at: Date.now(),
       });
     });
-    await expect(member.getByText('[Tamil] kal meeting kitne baje hai')).toBeVisible({ timeout: 20_000 });
+    await expect(member.getByText('[Tamil] kal meeting kitne baje hai').first()).toBeVisible({ timeout: 20_000 });
     await expect(member.getByTestId('translation-indicator')).toContainText('Live Translation');
   });
 });
