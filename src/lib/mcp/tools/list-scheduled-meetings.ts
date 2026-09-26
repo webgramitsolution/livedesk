@@ -12,7 +12,7 @@ function supabaseForUser(ctx: ToolContext) {
 export default defineTool({
   name: "list_scheduled_meetings",
   title: "List scheduled meetings",
-  description: "List the signed-in user's scheduled Zoom Connect meetings, ordered by date.",
+  description: "List the signed-in user's scheduled LiveDesk meetings, ordered by date.",
   inputSchema: {
     limit: z.number().int().min(1).max(100).optional().describe("Max meetings to return (default 25)."),
   },

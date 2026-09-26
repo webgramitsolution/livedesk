@@ -17,6 +17,8 @@ import {
   ChevronRight,
   MoreHorizontal,
   PenSquare,
+  PenLine,
+  MousePointerClick,
   BarChart3,
   Circle,
   Image as ImageIcon,
@@ -70,6 +72,8 @@ function ControlButton({
   badge,
   onClick,
   compact = false,
+  disabled = false,
+  testId,
 }: {
   icon: React.ElementType;
   label: string;
@@ -80,6 +84,8 @@ function ControlButton({
   badge?: number;
   onClick: () => void;
   compact?: boolean;
+  disabled?: boolean;
+  testId?: string;
 }) {
   const size = compact ? 'h-10 min-w-10 px-2' : 'h-11 min-w-11 px-2.5';
   const iconSize = 'w-4 h-4';
@@ -90,7 +96,10 @@ function ControlButton({
       whileTap={{ scale: 0.95 }}
       onClick={onClick}
       title={label}
-      className={`relative ${size} rounded-full flex items-center justify-center transition-colors shrink-0 ${
+      aria-label={label}
+      disabled={disabled}
+      data-testid={testId}
+      className={`relative ${size} rounded-full flex items-center justify-center transition-colors shrink-0 disabled:opacity-50 disabled:cursor-not-allowed ${
         danger
           ? 'bg-destructive text-destructive-foreground hover:bg-destructive/90'
           : warning
@@ -140,6 +149,21 @@ export function FloatingControlBar() {
   const isMobile = useIsMobile();
   useViewportSync();
   const myHandRaised = participants.find((p) => p.id === '1')?.handRaised ?? false;
+
+  // Permission-aware controls: the host's decisions disable the local buttons
+  // (the media tracks are disabled by the session manager and useWebRTC).
+  const session = useMeetingStore((s) => s.session);
+  const isAnnotating = useMeetingStore((s) => s.isAnnotating);
+  const toggleAnnotating = useMeetingStore((s) => s.toggleAnnotating);
+  const myPermission = useMeetingStore.getState().myPermission();
+  const isHost = !!session.myUserId && session.myUserId === session.hostUserId;
+  const hasPresentation = !!session.presenterId;
+  const canAnnotate = hasPresentation && myPermission.canAnnotate && (session.meetingControls.annotationEnabled || isHost);
+  const rcState = session.rcViewerState;
+  const micBlocked = !myPermission.canSpeak;
+  const cameraBlocked = !myPermission.canUseCamera;
+  const shareBlocked = !myPermission.canShareScreen;
+  const requestControlToggle = () => window.dispatchEvent(new CustomEvent('livedesk:rc-toggle'));
 
   // Keyboard shortcut: Ctrl/Cmd+/ focuses the taskbar (accessible entry point)
   useEffect(() => {
@@ -205,10 +229,32 @@ export function FloatingControlBar() {
             className="fixed bottom-[max(1rem,env(safe-area-inset-bottom))] inset-x-0 mx-auto z-40 flex w-fit max-w-[calc(100vw-1rem)] items-center justify-center gap-1.5 overflow-x-auto rounded-[28px] border border-border bg-background/95 px-2 py-2 backdrop-blur-md control-bar-elevated sm:bottom-4 sm:px-3 sm:py-2.5"
           >
             {/* Core controls always visible */}
-            <ControlButton icon={isMicOn ? Mic : MicOff} label={isMicOn ? 'Mute' : 'Unmute'} active={isMicOn} onClick={toggleMic} compact={isMobile} />
-            <ControlButton icon={isCameraOn ? Video : VideoOff} label={isCameraOn ? 'Camera off' : 'Camera on'} active={isCameraOn} onClick={toggleCamera} compact={isMobile} />
+            <ControlButton icon={isMicOn ? Mic : MicOff} label={micBlocked ? 'Muted by host' : isMicOn ? 'Mute' : 'Unmute'} active={isMicOn} disabled={micBlocked} onClick={toggleMic} compact={isMobile} />
+            <ControlButton icon={isCameraOn ? Video : VideoOff} label={cameraBlocked ? 'Camera disabled by host' : isCameraOn ? 'Camera off' : 'Camera on'} active={isCameraOn} disabled={cameraBlocked} onClick={toggleCamera} compact={isMobile} />
             {!isMobile && (
-              <ControlButton icon={isScreenSharing ? MonitorOff : Monitor} label={isScreenSharing ? 'Stop sharing' : 'Screen share'} active={isScreenSharing} highlight={isScreenSharing} onClick={toggleScreenShare} />
+              <ControlButton icon={isScreenSharing ? MonitorOff : Monitor} label={shareBlocked ? 'Screen sharing disabled by host' : isScreenSharing ? 'Stop sharing' : 'Screen share'} active={isScreenSharing} highlight={isScreenSharing} disabled={shareBlocked && !isScreenSharing} onClick={toggleScreenShare} />
+            )}
+            {!isMobile && hasPresentation && (
+              <ControlButton
+                icon={PenLine}
+                label={canAnnotate ? (isAnnotating ? 'Stop annotating' : 'Annotate') : 'Annotation not allowed'}
+                active={isAnnotating}
+                highlight={isAnnotating}
+                disabled={!canAnnotate}
+                onClick={toggleAnnotating}
+                testId="control-annotate"
+              />
+            )}
+            {!isMobile && rcState !== 'unavailable' && (
+              <ControlButton
+                icon={MousePointerClick}
+                label={rcState === 'controlling' ? 'Release control' : rcState === 'requesting' ? 'Cancel control request' : 'Request control'}
+                active={rcState !== 'idle'}
+                highlight={rcState === 'controlling'}
+                warning={rcState === 'requesting'}
+                onClick={requestControlToggle}
+                testId="control-remote"
+              />
             )}
             <ControlButton icon={Hand} label={myHandRaised ? 'Lower hand' : 'Raise hand'} warning={myHandRaised} onClick={() => toggleHandRaise('1')} compact={isMobile} />
             <ControlButton icon={Smile} label="Reactions" active={showReactions} highlight={showReactions} onClick={() => setShowReactions(!showReactions)} compact={isMobile} />

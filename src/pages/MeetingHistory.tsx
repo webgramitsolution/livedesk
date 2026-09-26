@@ -72,7 +72,7 @@ export default function MeetingHistory() {
   return (
     <div className="min-h-screen bg-background">
       <header className="flex items-center gap-3 px-4 sm:px-6 py-3 border-b border-border">
-        <Button variant="ghost" size="icon" onClick={() => navigate('/')}>
+        <Button variant="ghost" size="icon" onClick={() => navigate('/app')}>
           <ArrowLeft className="w-5 h-5" />
         </Button>
         <div className="flex items-center gap-2">
@@ -166,7 +166,7 @@ export default function MeetingHistory() {
                           store.setUserName(store.userName || 'You');
                           store.setMeetingId(m.meeting_code);
                           store.joinMeeting();
-                          navigate('/');
+                          navigate('/app');
                         }}
                       >
                         Join

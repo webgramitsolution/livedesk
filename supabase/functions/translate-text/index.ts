@@ -6,6 +6,14 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version',
 };
 
+const LANGUAGE_NAMES: Record<string, string> = {
+  hi: 'Hindi', en: 'English', ta: 'Tamil', te: 'Telugu', bn: 'Bengali', mr: 'Marathi',
+  gu: 'Gujarati', kn: 'Kannada', ml: 'Malayalam', pa: 'Punjabi', ar: 'Arabic', fr: 'French',
+  es: 'Spanish', de: 'German', pt: 'Portuguese', ja: 'Japanese', zh: 'Chinese', ko: 'Korean',
+};
+
+const MAX_TEXT_LENGTH = 2000;
+
 serve(async (req) => {
   if (req.method === 'OPTIONS') {
     return new Response(null, { headers: corsHeaders });
@@ -23,27 +31,23 @@ serve(async (req) => {
 
   const LOVABLE_API_KEY = Deno.env.get('LOVABLE_API_KEY');
   if (!LOVABLE_API_KEY) {
-    return new Response(JSON.stringify({ error: 'LOVABLE_API_KEY not configured' }), {
+    return new Response(JSON.stringify({ error: 'Translation provider not configured' }), {
       status: 500,
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
     });
   }
 
   try {
-    const { text, targetLanguage } = await req.json();
-    if (!text || !targetLanguage) {
-      return new Response(JSON.stringify({ error: 'text and targetLanguage are required' }), {
+    const { text, targetLanguage, sourceLanguage } = await req.json();
+    if (typeof text !== 'string' || !text.trim() || typeof targetLanguage !== 'string' || !LANGUAGE_NAMES[targetLanguage]) {
+      return new Response(JSON.stringify({ error: 'text and a supported targetLanguage are required' }), {
         status: 400,
         headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       });
     }
-
-    const langNames: Record<string, string> = {
-      en: 'English', es: 'Spanish', fr: 'French', de: 'German',
-      zh: 'Chinese', ja: 'Japanese', ko: 'Korean', ar: 'Arabic',
-      pt: 'Portuguese', hi: 'Hindi',
-    };
-    const targetName = langNames[targetLanguage] || targetLanguage;
+    const input = text.slice(0, MAX_TEXT_LENGTH);
+    const targetName = LANGUAGE_NAMES[targetLanguage];
+    const sourceName = typeof sourceLanguage === 'string' && LANGUAGE_NAMES[sourceLanguage] ? LANGUAGE_NAMES[sourceLanguage] : null;
 
     const response = await fetch('https://ai.gateway.lovable.dev/v1/chat/completions', {
       method: 'POST',
@@ -55,9 +59,9 @@ serve(async (req) => {
         messages: [
           {
             role: 'system',
-            content: `You are a real-time translation engine. Translate the given text to ${targetName}. Return ONLY the translated text, no explanations, no quotes, no extra formatting.`,
+            content: `You are a real-time speech translation engine for a live meeting. Translate the user's utterance ${sourceName ? `from ${sourceName} ` : ''}to ${targetName}. Preserve meaning, tone and names. If the text is already in ${targetName}, return it unchanged. Return ONLY the translated text with no quotes, explanations or formatting.`,
           },
-          { role: 'user', content: text },
+          { role: 'user', content: input },
         ],
       }),
     });
@@ -70,7 +74,7 @@ serve(async (req) => {
         });
       }
       if (response.status === 402) {
-        return new Response(JSON.stringify({ error: 'Payment required, please add funds.' }), {
+        return new Response(JSON.stringify({ error: 'Translation credits exhausted.' }), {
           status: 402,
           headers: { ...corsHeaders, 'Content-Type': 'application/json' },
         });
@@ -81,15 +85,14 @@ serve(async (req) => {
     }
 
     const data = await response.json();
-    const translatedText = data.choices?.[0]?.message?.content?.trim() || text;
+    const translatedText = data.choices?.[0]?.message?.content?.trim() || input;
 
-    return new Response(JSON.stringify({ translatedText }), {
+    return new Response(JSON.stringify({ translatedText, detectedSourceLanguage: sourceLanguage ?? null }), {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
     });
   } catch (error) {
     console.error('Translation error:', error);
-    const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-    return new Response(JSON.stringify({ error: errorMessage }), {
+    return new Response(JSON.stringify({ error: 'Translation failed' }), {
       status: 500,
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
     });

@@ -33,7 +33,14 @@ export function loadRCState(meetingId: string, sessionId: string): RCPersistedSt
       window.sessionStorage.removeItem(key(meetingId, sessionId));
       return null;
     }
-    return parsed;
+    // Granted control is never persisted across a reload: the presenter must
+    // approve again. Only the queue and an outstanding request survive.
+    return {
+      ...parsed,
+      activeController: null,
+      controlLock: null,
+      status: parsed.status?.state === 'requesting' ? parsed.status : { state: 'idle' },
+    };
   } catch {
     return null;
   }

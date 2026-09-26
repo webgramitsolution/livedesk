@@ -142,6 +142,9 @@ export function useKeyboardShortcuts(showHelp: boolean, setShowHelp: (v: boolean
       // Don't trigger when typing in inputs
       const tag = (e.target as HTMLElement)?.tagName;
       if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
+      // Keys are forwarded to the presenter while controlling; never treat them as shortcuts.
+      if (state().session.rcViewerState === 'controlling') return;
+      if (e.ctrlKey || e.metaKey || e.altKey) return;
 
       switch (e.key.toLowerCase()) {
         case 'm': state().toggleMic(); break;

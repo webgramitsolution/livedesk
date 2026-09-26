@@ -105,7 +105,7 @@ export default function OAuthConsent() {
             <Shield className="w-6 h-6 text-primary" />
           </div>
           <h1 className="font-display text-xl font-bold text-foreground">
-            Connect {clientName} to Zoom Connect
+            Connect {clientName} to LiveDesk
           </h1>
           <p className="text-sm text-muted-foreground">
             {clientName} will be able to call this app&apos;s enabled tools while you are signed in.

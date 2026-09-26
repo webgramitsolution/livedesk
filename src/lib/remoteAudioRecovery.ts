@@ -10,8 +10,9 @@ export async function recoverRemoteAudioPlayback(reason = 'manual') {
   await Promise.all(
     elements.map(async (audio, index) => {
       try {
-        audio.muted = false;
-        audio.volume = 1;
+        // Elements flagged by permission enforcement stay muted.
+        if (audio.dataset.forceMuted !== 'true') audio.muted = false;
+        // Volume is owned by the translation audio mode (VideoTile); leave it.
         await audio.play();
         played += 1;
       } catch (error) {

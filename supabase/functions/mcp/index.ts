@@ -18,7 +18,7 @@ function supabaseForUser(ctx) {
 var list_scheduled_meetings_default = defineTool({
   name: "list_scheduled_meetings",
   title: "List scheduled meetings",
-  description: "List the signed-in user's scheduled Zoom Connect meetings, ordered by date.",
+  description: "List the signed-in user's scheduled LiveDesk meetings, ordered by date.",
   inputSchema: {
     limit: z.number().int().min(1).max(100).optional().describe("Max meetings to return (default 25).")
   },
@@ -57,7 +57,7 @@ function generateMeetingCode() {
 var create_scheduled_meeting_default = defineTool2({
   name: "create_scheduled_meeting",
   title: "Schedule a meeting",
-  description: "Create a new scheduled Zoom Connect meeting for the signed-in user.",
+  description: "Create a new scheduled LiveDesk meeting for the signed-in user.",
   inputSchema: {
     title: z2.string().trim().min(1).describe("Meeting title."),
     meeting_date: z2.string().describe("Meeting date in YYYY-MM-DD format."),
@@ -102,7 +102,7 @@ function supabaseForUser3(ctx) {
 var list_active_meetings_default = defineTool3({
   name: "list_active_meeting_participants",
   title: "List active meeting participants",
-  description: "List participants currently present in a Zoom Connect meeting by meeting code.",
+  description: "List participants currently present in a LiveDesk meeting by meeting code.",
   inputSchema: {
     meeting_code: z3.string().trim().min(1).describe("The meeting code to inspect.")
   },
@@ -121,12 +121,12 @@ var list_active_meetings_default = defineTool3({
 });
 
 // src/lib/mcp/index.ts
-var projectRef = "xgfgcklvrlvkqvvbpcvv";
+var projectRef = "e2e";
 var mcp_default = defineMcp({
   name: "zoom-connect-mcp",
-  title: "Zoom Connect",
+  title: "LiveDesk",
   version: "0.1.0",
-  instructions: "Tools for Zoom Connect. Use `list_scheduled_meetings` to see the signed-in user's upcoming meetings, `create_scheduled_meeting` to schedule one, and `list_active_meeting_participants` to see who is currently in a meeting.",
+  instructions: "Tools for LiveDesk. Use `list_scheduled_meetings` to see the signed-in user's upcoming meetings, `create_scheduled_meeting` to schedule one, and `list_active_meeting_participants` to see who is currently in a meeting.",
   auth: auth.oauth.issuer({
     issuer: `https://${projectRef}.supabase.co/auth/v1`,
     acceptedAudiences: "authenticated"

@@ -16,7 +16,7 @@ function generateMeetingCode() {
 export default defineTool({
   name: "create_scheduled_meeting",
   title: "Schedule a meeting",
-  description: "Create a new scheduled Zoom Connect meeting for the signed-in user.",
+  description: "Create a new scheduled LiveDesk meeting for the signed-in user.",
   inputSchema: {
     title: z.string().trim().min(1).describe("Meeting title."),
     meeting_date: z.string().describe("Meeting date in YYYY-MM-DD format."),

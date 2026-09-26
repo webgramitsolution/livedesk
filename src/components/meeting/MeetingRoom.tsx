@@ -15,12 +15,17 @@ import { PerformanceHud } from './PerformanceHud';
 import { AlignmentDebugOverlay } from './AlignmentDebugOverlay';
 import { MobileSubmenus } from './MobileSubmenus';
 import { MediaDiagnosticsPanel } from './MediaDiagnosticsPanel';
+import { ElectronSourcePicker } from './ElectronSourcePicker';
+import { RoomSync } from './RoomSync';
+import { ConnectionBanner } from './ConnectionBanner';
 import { useSwipeGesture } from '@/hooks/useSwipeGesture';
 import { useIsMobile } from '@/hooks/use-mobile';
 import { useWebRTC } from '@/hooks/useWebRTC';
 import { useMeetingRecorder } from '@/hooks/useMeetingRecorder';
 import { useVirtualBackground } from '@/hooks/useVirtualBackground';
+import { useTranslationPipeline } from '@/hooks/useTranslationPipeline';
 import { recoverRemoteAudioPlayback } from '@/lib/remoteAudioRecovery';
+import { getDataBus } from '@/lib/dataPlane';
 import { useMeetingStore } from '@/store/meetingStore';
 import { motion } from 'framer-motion';
 import { useState, useEffect, useRef } from 'react';
@@ -36,7 +41,22 @@ export function MeetingRoom() {
   const setRightPanel = useMeetingStore((s) => s.setRightPanel);
   const isMobile = useIsMobile();
   const videoAreaRef = useRef<HTMLDivElement>(null);
-  const { localStream, remoteStreams, screenStream, remoteScreenStream, remoteScreenPeerId, getPeerStats, getPeerDiagnostics, getDiagnosticsSnapshot, selectLocalDevices } = useWebRTC(meetingId, screen === 'meeting');
+  const { localStream, remoteStreams, screenStream, remoteScreenStream, remoteScreenPeerId, peerStates, connectionSummary, getPeerStats, getPeerDiagnostics, getDiagnosticsSnapshot, selectLocalDevices } = useWebRTC(meetingId, screen === 'meeting');
+  const setSession = useMeetingStore((s) => s.setSession);
+
+  // Mirror the media-plane connection state into the central session state
+  // so the top bar and participant panel show real connection status.
+  const hostSessionId = useMeetingStore((s) => s.session.hostSessionId);
+  const meetingSessionId = useMeetingStore((s) => s.meetingSessionId);
+  useEffect(() => {
+    const states: Record<string, string> = {};
+    peerStates.forEach((state, peerId) => {
+      states[peerId] = state;
+    });
+    const hostState = hostSessionId && hostSessionId !== meetingSessionId ? states[hostSessionId] : undefined;
+    const hostDown = hostState === 'disconnected' || hostState === 'failed';
+    setSession({ peerConnectionStates: states, connectionState: hostDown ? 'host-disconnected' : connectionSummary });
+  }, [peerStates, connectionSummary, setSession, hostSessionId, meetingSessionId]);
 
   const PANEL_CYCLE: Array<'ai' | 'participants' | 'chat'> = ['ai', 'participants', 'chat'];
   useSwipeGesture(videoAreaRef, {
@@ -55,6 +75,17 @@ export function MeetingRoom() {
     },
   });
   const processedLocalStream = useVirtualBackground(localStream);
+  useTranslationPipeline({ enabled: screen === 'meeting', localStream, remoteStreams });
+
+  // Settings modal device changes are applied by useWebRTC (track replacement).
+  useEffect(() => {
+    const onSelect = (e: Event) => {
+      const detail = (e as CustomEvent<{ audioDeviceId?: string; videoDeviceId?: string }>).detail;
+      if (detail) selectLocalDevices(detail);
+    };
+    window.addEventListener('livedesk:select-devices', onSelect);
+    return () => window.removeEventListener('livedesk:select-devices', onSelect);
+  }, [selectLocalDevices]);
   const { startRecording, stopRecording, recordingBlob, downloadRecording, clearRecording } = useMeetingRecorder();
   const [soundUnlockVisible, setSoundUnlockVisible] = useState(false);
 
@@ -99,6 +130,15 @@ export function MeetingRoom() {
         assignAllToFirstRoom?: () => void;
         simulateSelfCaptureShare?: (on: boolean) => void;
       };
+      __LIVEDESK_DEBUG__?: Record<string, unknown>;
+    };
+
+    // Development-only introspection for the real-media browser tests.
+    e2eWindow.__LIVEDESK_DEBUG__ = {
+      store: useMeetingStore,
+      bus: getDataBus(),
+      getDiagnosticsSnapshot,
+      executedInputs: () => (window as typeof window & { __livedeskExecutedInputs?: number }).__livedeskExecutedInputs ?? 0,
     };
 
     e2eWindow.__ZOOM_CONNECT_E2E__ = {
@@ -129,8 +169,9 @@ export function MeetingRoom() {
 
     return () => {
       delete e2eWindow.__ZOOM_CONNECT_E2E__;
+      delete e2eWindow.__LIVEDESK_DEBUG__;
     };
-  }, []);
+  }, [getDiagnosticsSnapshot]);
 
   // Sync store recording toggle with actual MediaRecorder
   useEffect(() => {
@@ -148,7 +189,9 @@ export function MeetingRoom() {
   return (
     <div className="h-screen flex flex-col bg-background overflow-hidden">
       <MeetingPresenceManager />
+      <RoomSync />
       <NavigationBar />
+      <ConnectionBanner />
       <div className="flex-1 flex overflow-hidden">
         <div ref={videoAreaRef} className="flex-1 relative flex flex-col min-w-0">
           <VideoGrid localStream={processedLocalStream} remoteStreams={remoteStreams} screenStream={screenStream} remoteScreenStream={remoteScreenStream} remoteScreenPeerId={remoteScreenPeerId} getDiagnosticsSnapshot={getDiagnosticsSnapshot} />
@@ -168,6 +211,7 @@ export function MeetingRoom() {
       <MediaDiagnosticsPanel onSelectDevices={selectLocalDevices} getDiagnosticsSnapshot={getDiagnosticsSnapshot} />
       <AlignmentDebugOverlay />
       <MobileSubmenus />
+      <ElectronSourcePicker />
 
       {soundUnlockVisible && (
         <button

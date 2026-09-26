@@ -1,346 +1,221 @@
-import { X, BrainCircuit, Languages, Volume2, ShieldCheck, Waves, Mic, MicOff } from 'lucide-react';
-import { useMeetingStore } from '@/store/meetingStore';
+import { X, Languages, Volume2, Waves, ShieldCheck, Mic, AlertTriangle, Loader2, CheckCircle2 } from 'lucide-react';
+import { useMeetingStore, type TranscriptEntry } from '@/store/meetingStore';
 import { Switch } from '@/components/ui/switch';
 import { motion, AnimatePresence } from 'framer-motion';
-import { useLiveTranscription } from '@/hooks/useLiveTranscription';
 import { usePanelOverlayMode } from '@/hooks/use-mobile';
+import { SUPPORTED_LANGUAGES, languageLabel } from '@/lib/translation/languages';
+import { cn } from '@/lib/utils';
 
-const LANG_NAMES: Record<string, string> = {
-  en: 'English', es: 'Spanish', fr: 'French', de: 'German',
-  zh: 'Chinese', ja: 'Japanese', ko: 'Korean', ar: 'Arabic',
-  pt: 'Portuguese', hi: 'Hindi',
-};
+function SttStatusLine() {
+  const status = useMeetingStore((s) => s.translationStatus);
+  const enabled = useMeetingStore((s) => s.translation.enabled);
+  const isMicOn = useMeetingStore((s) => s.isMicOn);
+  if (!enabled) return <p className="text-[11px] text-muted-foreground">Translation is off. Turn it on to hear other languages in yours.</p>;
+  if (!isMicOn) return <p className="text-[11px] text-muted-foreground">Your microphone is off; your speech is not transcribed. Others are still translated for you.</p>;
+  const map = {
+    idle: { Icon: Mic, tone: 'text-muted-foreground', label: 'Speech recognition idle' },
+    starting: { Icon: Loader2, tone: 'text-muted-foreground', label: 'Starting speech recognition' },
+    listening: { Icon: CheckCircle2, tone: 'text-success', label: `Listening (${status.sttProvider === 'browser' ? 'browser engine' : 'ElevenLabs Scribe'})` },
+    error: { Icon: AlertTriangle, tone: 'text-destructive', label: status.sttDetail || 'Speech recognition error' },
+    unavailable: { Icon: AlertTriangle, tone: 'text-amber-500', label: status.sttDetail || 'Speech recognition unavailable' },
+  } as const;
+  const cfg = map[status.stt];
+  return (
+    <p className={cn('flex items-center gap-1.5 text-[11px]', cfg.tone)} data-testid="stt-status">
+      <cfg.Icon className={cn('h-3 w-3', status.stt === 'starting' && 'animate-spin')} /> {cfg.label}
+    </p>
+  );
+}
 
-const TRANSLATED_SAMPLES: Record<string, Record<string, string>> = {
-  'Sarah Chen': {
-    en: 'Let me share the latest metrics from Q4...',
-    hi: 'मुझे Q4 से नवीनतम मेट्रिक्स साझा करने दें...',
-    es: 'Permítanme compartir las últimas métricas del Q4...',
-    fr: 'Permettez-moi de partager les dernières métriques du Q4...',
-    de: 'Lassen Sie mich die neuesten Kennzahlen aus Q4 teilen...',
-    zh: '让我分享第四季度的最新指标...',
-    ja: 'Q4の最新指標を共有させてください...',
-    ko: 'Q4의 최신 지표를 공유하겠습니다...',
-  },
-  'Alex Rivera': {
-    en: 'The conversion rates look promising this quarter.',
-    hi: 'इस तिमाही में रूपांतरण दरें आशाजनक दिख रही हैं।',
-    es: 'Las tasas de conversión parecen prometedoras este trimestre.',
-  },
-  'You': {
-    en: 'Can we look at the regional breakdown?',
-    hi: 'क्या हम क्षेत्रीय विश्लेषण देख सकते हैं?',
-    es: '¿Podemos ver el desglose regional?',
-  },
-  'Maya Singh': {
-    en: 'I have the APAC numbers ready to present.',
-    hi: 'मेरे पास APAC के आंकड़े प्रस्तुत करने के लिए तैयार हैं।',
-    es: 'Tengo los números de APAC listos para presentar.',
-  },
-  'David Kim': {
-    en: 'Great, let us start with the overview.',
-    hi: 'बढ़िया, चलिए अवलोकन से शुरू करते हैं।',
-    es: 'Genial, comencemos con la descripción general.',
-  },
-};
+function TranscriptItem({ entry, mine }: { entry: TranscriptEntry; mine: boolean }) {
+  const statusLabel =
+    entry.status === 'translating'
+      ? 'translating'
+      : entry.status === 'low-confidence'
+        ? 'low confidence, not translated'
+        : entry.status === 'error'
+          ? 'translation failed'
+          : entry.status === 'live'
+            ? 'live'
+            : null;
+  return (
+    <motion.div initial={{ opacity: 0, x: 10 }} animate={{ opacity: entry.status === 'live' ? 0.65 : 1, x: 0 }} className="mb-2" data-testid="transcript-entry">
+      <div className="mb-0.5 flex items-center gap-2">
+        <span className="font-mono text-[10px] text-muted-foreground">[{entry.timestamp}]</span>
+        <span className={cn('text-xs font-bold', mine ? 'text-primary' : 'text-foreground')}>{entry.speaker}</span>
+        <span className="rounded bg-secondary px-1 py-0.5 text-[9px] text-muted-foreground">{languageLabel(entry.sourceLanguage)}</span>
+        {statusLabel && (
+          <span className={cn('text-[9px]', entry.status === 'error' || entry.status === 'low-confidence' ? 'text-amber-600' : 'text-muted-foreground', entry.status === 'translating' && 'animate-pulse text-primary')}>
+            {statusLabel}
+          </span>
+        )}
+      </div>
+      <div className={cn('border-l-2 pl-3', mine ? 'border-primary' : entry.translatedText ? 'border-success' : 'border-border')}>
+        {entry.translatedText ? (
+          <>
+            <p className="text-sm leading-relaxed text-foreground">{entry.translatedText}</p>
+            <p className="mt-0.5 text-[11px] text-muted-foreground/70">{entry.text}</p>
+          </>
+        ) : (
+          <p className={cn('text-sm leading-relaxed', entry.status === 'live' ? 'italic text-muted-foreground' : 'text-foreground')}>{entry.text}</p>
+        )}
+      </div>
+    </motion.div>
+  );
+}
 
 export function AISidebar() {
-  const {
-    rightPanel, toggleRightPanel, isTranslationEnabled, toggleTranslation,
-    isNoiseCancellationOn, toggleNoiseCancellation,
-    transcript, selectedLanguage, participants,
-  } = useMeetingStore();
-
-  const { isConnected, isConnecting, liveTranscripts, partialText, error, start, stop, translateText } = useLiveTranscription();
+  const rightPanel = useMeetingStore((s) => s.rightPanel);
+  const toggleRightPanel = useMeetingStore((s) => s.toggleRightPanel);
+  const translation = useMeetingStore((s) => s.translation);
+  const setTranslation = useMeetingStore((s) => s.setTranslation);
+  const status = useMeetingStore((s) => s.translationStatus);
+  const isNoiseCancellationOn = useMeetingStore((s) => s.isNoiseCancellationOn);
+  const toggleNoiseCancellation = useMeetingStore((s) => s.toggleNoiseCancellation);
+  const transcript = useMeetingStore((s) => s.transcript);
+  const participants = useMeetingStore((s) => s.participants);
+  const aiLatencyMs = useMeetingStore((s) => s.aiLatencyMs);
   const mode = usePanelOverlayMode();
   const isOverlay = mode !== 'desktop';
   const isMobile = mode === 'mobile';
-
   const isOpen = rightPanel === 'ai';
-  const langLabel = LANG_NAMES[selectedLanguage] || selectedLanguage.toUpperCase();
 
-  const prevTranscriptsRef = liveTranscripts;
-  if (isTranslationEnabled && selectedLanguage !== 'en') {
-    prevTranscriptsRef.forEach((lt) => {
-      if (!lt.isPartial && !lt.translatedText && !lt.isTranslating) {
-        translateText(lt.id, lt.text, selectedLanguage);
-      }
-    });
-  }
-
-  const getTranslatedText = (speaker: string, originalText: string) => {
-    if (!isTranslationEnabled || selectedLanguage === 'en') return originalText;
-    return TRANSLATED_SAMPLES[speaker]?.[selectedLanguage] || originalText;
-  };
+  const otherLanguages = Array.from(new Set(participants.filter((p) => p.id !== '1').map((p) => p.spokenLanguage))).filter((l) => l !== translation.preferredLanguage);
 
   return (
     <AnimatePresence>
       {isOpen && (
         <>
           {isOverlay && (
-            <motion.div
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              className="fixed inset-0 z-50 bg-foreground/25 backdrop-blur-sm"
-              onClick={() => toggleRightPanel('ai')}
-            />
+            <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="fixed inset-0 z-50 bg-foreground/25 backdrop-blur-sm" onClick={() => toggleRightPanel('ai')} />
           )}
           <motion.aside
             initial={isMobile ? { y: '100%', opacity: 0.6 } : mode === 'tablet' ? { x: '100%', opacity: 0.6 } : { width: 0, opacity: 0 }}
-            animate={isMobile ? { y: 0, opacity: 1 } : mode === 'tablet' ? { x: 0, opacity: 1 } : { width: 320, opacity: 1 }}
+            animate={isMobile ? { y: 0, opacity: 1 } : mode === 'tablet' ? { x: 0, opacity: 1 } : { width: 340, opacity: 1 }}
             exit={isMobile ? { y: '100%', opacity: 0.6 } : mode === 'tablet' ? { x: '100%', opacity: 0.6 } : { width: 0, opacity: 0 }}
             transition={{ duration: 0.25, ease: 'easeInOut' }}
-            className={`${
-              isMobile
-                ? 'fixed inset-0 z-[60] rounded-none border-0'
-                : mode === 'tablet'
-                  ? 'fixed inset-y-0 right-0 w-[90vw] max-w-[420px] z-[60] border-l shadow-2xl'
-                  : 'h-full shrink-0 border-l'
-            } bg-background flex flex-col overflow-hidden`}
-            style={mode === 'desktop' ? { width: 320 } : undefined}
+            className={`${isMobile ? 'fixed inset-0 z-[60] rounded-none border-0' : mode === 'tablet' ? 'fixed inset-y-0 right-0 w-[90vw] max-w-[420px] z-[60] border-l shadow-2xl' : 'h-full shrink-0 border-l'} bg-background flex flex-col overflow-hidden`}
+            style={mode === 'desktop' ? { width: 340 } : undefined}
+            data-testid="translation-panel"
           >
-          <div className="flex items-center justify-between p-4 border-b border-border">
-            <div className="flex items-center gap-2">
-              <BrainCircuit className="w-5 h-5 text-primary" />
-              <h2 className="font-display font-bold text-foreground text-lg">AI Assistant</h2>
-            </div>
-            <button
-              onClick={() => toggleRightPanel('ai')}
-              className="w-8 h-8 rounded-full flex items-center justify-center hover:bg-muted transition-colors text-muted-foreground"
-            >
-              <X className="w-4 h-4" />
-            </button>
-          </div>
-
-          <div className={`space-y-4 border-b border-border ${isMobile ? 'px-4 pb-4 pt-3' : 'p-4'}`}>
-            <div className="flex items-center justify-between">
+            <div className="flex items-center justify-between border-b border-border p-4">
               <div className="flex items-center gap-2">
-                <Languages className="w-4 h-4 text-primary" />
-                <span className="text-sm font-medium text-foreground">Voice Translation</span>
+                <Languages className="h-5 w-5 text-primary" />
+                <h2 className="font-display text-lg font-bold text-foreground">Live Translation</h2>
               </div>
-              <Switch checked={isTranslationEnabled} onCheckedChange={toggleTranslation} />
+              <button onClick={() => toggleRightPanel('ai')} className="flex h-8 w-8 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-muted" aria-label="Close translation panel">
+                <X className="h-4 w-4" />
+              </button>
             </div>
 
-            {isTranslationEnabled && (
-              <motion.div
-                initial={{ opacity: 0, height: 0 }}
-                animate={{ opacity: 1, height: 'auto' }}
-                className="bg-primary/5 border border-primary/20 rounded-lg p-3"
-              >
-                <div className="flex items-center gap-2 mb-1">
-                  <Languages className="w-3.5 h-3.5 text-primary" />
-                  <span className="text-xs font-bold text-primary">Translating to {langLabel}</span>
-                </div>
-                <p className="text-[11px] text-muted-foreground">
-                  All speech is translated in real-time. Change language in Settings.
-                </p>
-                <div className="flex flex-wrap gap-1 mt-2">
-                  {participants.filter(p => !p.isMuted && p.id !== '1').map((p) => (
-                    <span key={p.id} className="text-[10px] px-1.5 py-0.5 rounded-full bg-background border border-border text-muted-foreground">
-                      {p.name.split(' ')[0]}: {LANG_NAMES[p.spokenLanguage] || p.spokenLanguage}
-                    </span>
+            <div className={`space-y-3 border-b border-border ${isMobile ? 'px-4 pb-4 pt-3' : 'p-4'}`}>
+              <div className="flex items-center justify-between">
+                <span className="text-sm font-medium text-foreground">Voice translation</span>
+                <Switch checked={translation.enabled} onCheckedChange={(v) => setTranslation({ enabled: v })} data-testid="translation-toggle" />
+              </div>
+
+              <div className="grid grid-cols-2 gap-2">
+                <label className="text-[11px] font-semibold text-muted-foreground">
+                  I want to hear
+                  <select
+                    value={translation.preferredLanguage}
+                    onChange={(e) => setTranslation({ preferredLanguage: e.target.value as typeof translation.preferredLanguage })}
+                    className="mt-1 w-full rounded-lg border border-input bg-background px-2 py-1.5 text-xs text-foreground"
+                    data-testid="preferred-language"
+                  >
+                    {SUPPORTED_LANGUAGES.map((l) => (
+                      <option key={l.code} value={l.code}>{l.label} ({l.nativeLabel})</option>
+                    ))}
+                  </select>
+                </label>
+                <label className="text-[11px] font-semibold text-muted-foreground">
+                  I speak
+                  <select
+                    value={translation.sourceLanguage}
+                    onChange={(e) => setTranslation({ sourceLanguage: e.target.value as typeof translation.sourceLanguage })}
+                    className="mt-1 w-full rounded-lg border border-input bg-background px-2 py-1.5 text-xs text-foreground"
+                    data-testid="source-language"
+                  >
+                    <option value="auto">Same as above</option>
+                    {SUPPORTED_LANGUAGES.map((l) => (
+                      <option key={l.code} value={l.code}>{l.label}</option>
+                    ))}
+                  </select>
+                </label>
+              </div>
+
+              <div>
+                <p className="mb-1 text-[11px] font-semibold text-muted-foreground">Audio for other languages</p>
+                <div className="grid grid-cols-3 gap-1 rounded-lg bg-muted p-1" role="radiogroup" aria-label="Audio mode">
+                  {(['original', 'translated', 'both'] as const).map((m) => (
+                    <button
+                      key={m}
+                      type="button"
+                      role="radio"
+                      aria-checked={translation.audioMode === m}
+                      onClick={() => setTranslation({ audioMode: m })}
+                      className={cn('rounded-md px-2 py-1 text-[11px] font-medium capitalize', translation.audioMode === m ? 'bg-background text-foreground shadow' : 'text-muted-foreground')}
+                      data-testid={`audio-mode-${m}`}
+                    >
+                      {m}
+                    </button>
                   ))}
                 </div>
-              </motion.div>
-            )}
-
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                <Waves className="w-4 h-4 text-primary" />
-                <span className="text-sm font-medium text-foreground">Noise Cancellation</span>
+                {!status.ttsAvailable && translation.enabled && (
+                  <p className="mt-1 text-[10px] text-amber-600">Speech output is unavailable in this browser; translations are shown as captions.</p>
+                )}
               </div>
-              <Switch checked={isNoiseCancellationOn} onCheckedChange={toggleNoiseCancellation} />
-            </div>
 
-            {isNoiseCancellationOn && (
-              <motion.div
-                initial={{ opacity: 0, height: 0 }}
-                animate={{ opacity: 1, height: 'auto' }}
-                className="bg-success/5 border border-success/20 rounded-lg p-3"
-              >
-                <div className="flex items-center gap-2 mb-1">
-                  <ShieldCheck className="w-3.5 h-3.5 text-success" />
-                  <span className="text-xs font-bold text-success">Noise Filter Active</span>
+              {translation.enabled && (
+                <div className="rounded-lg border border-primary/20 bg-primary/5 p-2.5" data-testid="translation-indicator">
+                  <p className="text-xs font-bold text-primary">
+                    {otherLanguages.length > 0
+                      ? `Live Translation: ${otherLanguages.map(languageLabel).join(', ')} → ${languageLabel(translation.preferredLanguage)}`
+                      : `Live Translation: waiting for another language (you hear ${languageLabel(translation.preferredLanguage)})`}
+                  </p>
+                  <SttStatusLine />
+                  {status.lastError && <p className="mt-1 text-[10px] text-destructive">{status.lastError}</p>}
                 </div>
-                <div className="flex items-center gap-2 mt-2">
-                  <div className="flex-1 h-1.5 bg-muted rounded-full overflow-hidden">
-                    <motion.div
-                      className="h-full bg-success rounded-full"
-                      animate={{ width: ['60%', '85%', '70%', '90%', '75%'] }}
-                      transition={{ duration: 3, repeat: Infinity, ease: 'linear' }}
-                    />
-                  </div>
-                  <span className="text-[10px] text-muted-foreground">Filtering</span>
-                </div>
-              </motion.div>
-            )}
+              )}
 
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                <Volume2 className="w-4 h-4 text-primary" />
-                <span className="text-sm font-medium text-foreground">Voice Activity</span>
-              </div>
-              <div className="flex items-center gap-1">
-                {[1, 2, 3, 4, 5].map((i) => (
-                  <div
-                    key={i}
-                    className={`w-1 rounded-full transition-all ${
-                      i <= 3 ? 'h-3 bg-success' : 'h-2 bg-muted'
-                    }`}
-                  />
-                ))}
-              </div>
-            </div>
-
-            <div className="bg-secondary rounded-lg p-3">
-              <div className="flex items-center justify-between mb-1">
+              <div className="flex items-center justify-between">
                 <div className="flex items-center gap-2">
-                  <span className={`w-2 h-2 rounded-full ${isConnected ? 'bg-success animate-pulse-glow' : 'bg-muted-foreground'}`} />
-                  <span className={`text-xs font-bold ${isConnected ? 'text-success' : 'text-muted-foreground'}`}>
-                    {isConnected ? 'ElevenLabs Scribe Active' : 'ElevenLabs Scribe'}
-                  </span>
+                  <Waves className="h-4 w-4 text-primary" />
+                  <span className="text-sm font-medium text-foreground">Noise filter</span>
                 </div>
-                <motion.button
-                  whileTap={{ scale: 0.9 }}
-                  onClick={isConnected ? stop : start}
-                  disabled={isConnecting}
-                  className={`flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-medium transition-colors ${
-                    isConnected
-                      ? 'bg-destructive/10 text-destructive hover:bg-destructive/20'
-                      : 'bg-primary/10 text-primary hover:bg-primary/20'
-                  } disabled:opacity-50`}
-                >
-                  {isConnected ? <MicOff className="w-3 h-3" /> : <Mic className="w-3 h-3" />}
-                  {isConnecting ? 'Connecting...' : isConnected ? 'Stop' : 'Start Live'}
-                </motion.button>
+                <Switch checked={isNoiseCancellationOn} onCheckedChange={toggleNoiseCancellation} />
               </div>
-              <p className="text-[11px] text-muted-foreground">
-                {isConnected ? 'Real-time transcription via microphone' : 'Click Start to transcribe your microphone input'}
-              </p>
-              {error && (
-                <p className="text-[11px] text-destructive mt-1">{error}</p>
+              {isNoiseCancellationOn && (
+                <p className="flex items-center gap-1.5 text-[11px] text-success"><ShieldCheck className="h-3.5 w-3.5" /> High-pass, low-pass and compression applied to your microphone.</p>
               )}
             </div>
-          </div>
 
-          <div className={`flex-1 overflow-y-auto space-y-3 ${isMobile ? 'px-4 pb-[calc(6rem+env(safe-area-inset-bottom))] pt-4' : 'p-4'}`}>
-            <h3 className="text-xs font-bold text-muted-foreground uppercase tracking-wider mb-2">
-              Live Transcript {isTranslationEnabled && selectedLanguage !== 'en' ? `(→ ${langLabel})` : ''}
-            </h3>
+            <div className={`flex-1 overflow-y-auto ${isMobile ? 'px-4 pb-[calc(6rem+env(safe-area-inset-bottom))] pt-4' : 'p-4'}`}>
+              <h3 className="mb-2 text-xs font-bold uppercase tracking-wider text-muted-foreground">Captions</h3>
+              {transcript.length === 0 && (
+                <p className="text-xs text-muted-foreground">Captions appear here as people speak{translation.enabled ? '' : ' once translation is on'}.</p>
+              )}
+              {transcript.map((entry) => (
+                <TranscriptItem key={entry.id} entry={entry} mine={entry.speakerId === useMeetingStore.getState().meetingSessionId} />
+              ))}
+            </div>
 
-            {liveTranscripts.map((lt) => {
-              const SPEAKER_COLORS: Record<string, string> = {
-                'You': 'text-primary border-primary',
-                'Speaker 2': 'text-accent-foreground border-accent',
-                'Speaker 3': 'text-success border-success',
-                'Speaker 4': 'text-yellow-500 border-yellow-500',
-                'Speaker 5': 'text-destructive border-destructive',
-              };
-              const colorClass = SPEAKER_COLORS[lt.speaker] || 'text-primary border-primary';
-              const borderColor = lt.isPartial ? 'border-primary/40' : colorClass.split(' ')[1] || 'border-primary';
-
-              return (
-                <motion.div
-                  key={lt.id}
-                  initial={{ opacity: 0, x: 10 }}
-                  animate={{ opacity: lt.isPartial ? 0.6 : 1, x: 0 }}
-                  className="mb-2"
-                >
-                  <div className="flex items-center gap-2 mb-0.5">
-                    <span className="text-[10px] font-mono text-muted-foreground">
-                      [{new Date(lt.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}]
-                    </span>
-                    <span className={`text-xs font-bold ${colorClass.split(' ')[0]}`}>
-                      {lt.speaker}
-                    </span>
-                    {lt.isPartial && <span className="text-[9px] text-muted-foreground font-normal">(live)</span>}
-                    {lt.isTranslating && <span className="text-[9px] text-primary animate-pulse">translating...</span>}
-                  </div>
-                  <div className={`pl-4 border-l-2 ${borderColor}`}>
-                    {lt.translatedText && (
-                      <p className="text-[10px] text-muted-foreground/60 line-through mb-0.5">"{lt.text}"</p>
-                    )}
-                    <p className={`text-sm leading-relaxed ${lt.isPartial ? 'text-muted-foreground italic' : 'text-foreground'}`}>
-                      "{lt.translatedText || lt.text}"
-                      {lt.translatedText && <span className="ml-1 text-[9px] text-primary font-bold">🌐</span>}
-                    </p>
-                  </div>
-                </motion.div>
-              );
-            })}
-
-            {partialText && liveTranscripts.every(t => !t.isPartial) && (
-              <motion.div initial={{ opacity: 0 }} animate={{ opacity: 0.5 }} className="mb-2">
-                <div className="pl-4 border-l-2 border-primary/30">
-                  <p className="text-sm leading-relaxed text-muted-foreground italic">"{partialText}"</p>
+            <div className="border-t border-border bg-secondary/50 p-3">
+              <div className="grid grid-cols-3 gap-2 text-center">
+                <div>
+                  <p className="text-sm font-bold text-foreground">{aiLatencyMs > 0 ? `${(aiLatencyMs / 1000).toFixed(1)}s` : '–'}</p>
+                  <p className="text-[10px] text-muted-foreground">Last translation</p>
                 </div>
-              </motion.div>
-            )}
-            {transcript.map((entry) => {
-              const translated = getTranslatedText(entry.speaker, entry.text);
-              const isTranslated = isTranslationEnabled && selectedLanguage !== 'en' && translated !== entry.text;
-              const speakerParticipant = participants.find(p => p.name === entry.speaker);
-              const speakerLang = speakerParticipant?.spokenLanguage;
-
-              return (
-                <motion.div
-                  key={entry.id}
-                  initial={{ opacity: 0, x: 10 }}
-                  animate={{ opacity: 1, x: 0 }}
-                  className={`${entry.isActive ? '' : 'opacity-60'}`}
-                >
-                  <div className="flex items-center gap-2 mb-0.5">
-                    <span className="text-[10px] font-mono text-muted-foreground">
-                      [{entry.timestamp}]
-                    </span>
-                    <span
-                      className={`text-xs font-bold ${
-                        entry.isActive ? 'text-foreground' : 'text-muted-foreground'
-                      }`}
-                    >
-                      {entry.speaker}
-                    </span>
-                    {speakerLang && speakerLang !== 'en' && (
-                      <span className="text-[9px] px-1 py-0.5 rounded bg-secondary text-muted-foreground">
-                        {LANG_NAMES[speakerLang]?.slice(0, 3).toUpperCase() || speakerLang}
-                      </span>
-                    )}
-                  </div>
-                  <div className={`pl-4 border-l-2 ${entry.isActive ? 'border-primary' : 'border-border'}`}>
-                    {isTranslated && (
-                      <p className="text-[10px] text-muted-foreground/60 line-through mb-0.5">
-                        "{entry.text}"
-                      </p>
-                    )}
-                    <p className={`text-sm leading-relaxed ${entry.isActive ? 'text-foreground' : 'text-muted-foreground'}`}>
-                      "{translated}"
-                      {isTranslated && (
-                        <span className="ml-1 text-[9px] text-primary font-bold">🌐</span>
-                      )}
-                    </p>
-                  </div>
-                </motion.div>
-              );
-            })}
-          </div>
-
-          <div className="p-4 border-t border-border bg-secondary/50">
-            <div className="grid grid-cols-3 gap-2 text-center">
-              <div>
-                <p className="text-lg font-bold text-foreground">1.2s</p>
-                <p className="text-[10px] text-muted-foreground">Avg Latency</p>
-              </div>
-              <div>
-                <p className="text-lg font-bold text-foreground">94%</p>
-                <p className="text-[10px] text-muted-foreground">Accuracy</p>
-              </div>
-              <div>
-                <p className="text-lg font-bold text-primary">{langLabel.slice(0, 2).toUpperCase()}</p>
-                <p className="text-[10px] text-muted-foreground">Target</p>
+                <div>
+                  <p className="text-sm font-bold text-foreground">{status.translationProvider ?? '–'}</p>
+                  <p className="text-[10px] text-muted-foreground">Provider</p>
+                </div>
+                <div>
+                  <p className="flex items-center justify-center gap-1 text-sm font-bold text-primary"><Volume2 className="h-3.5 w-3.5" /> {status.ttsAvailable ? 'On' : 'Off'}</p>
+                  <p className="text-[10px] text-muted-foreground">Speech output</p>
+                </div>
               </div>
             </div>
-          </div>
           </motion.aside>
         </>
       )}

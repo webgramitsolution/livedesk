@@ -22,6 +22,17 @@ interface ScheduledMeeting {
   recurrence: string;
 }
 
+type ScheduledMeetingRow = {
+  id: string;
+  title: string;
+  meeting_date: string;
+  meeting_time: string;
+  duration: string;
+  meeting_code: string;
+  invitees: string[] | null;
+  recurrence: string | null;
+};
+
 const TIME_SLOTS = [
   '09:00', '09:30', '10:00', '10:30', '11:00', '11:30',
   '12:00', '12:30', '13:00', '13:30', '14:00', '14:30',
@@ -56,7 +67,7 @@ export function MeetingScheduler({ isOpen, onClose }: { isOpen: boolean; onClose
       .order('meeting_date', { ascending: true });
 
     if (!error && data) {
-      setMeetings(data.map((m: any) => ({
+      setMeetings(data.map((m: ScheduledMeetingRow) => ({
         id: m.id,
         title: m.title,
         date: new Date(m.meeting_date),
@@ -114,7 +125,7 @@ export function MeetingScheduler({ isOpen, onClose }: { isOpen: boolean; onClose
       invitees: [...invitees],
       recurrence,
       user_id: session.user.id,
-    } as any);
+    } as never);
 
     if (error) {
       toast.error('Failed to schedule meeting');
@@ -162,7 +173,7 @@ export function MeetingScheduler({ isOpen, onClose }: { isOpen: boolean; onClose
 
   const shareMeeting = async (meetingId: string, titleText: string) => {
     const meetingLink = buildMeetingLink(meetingId);
-    const shareText = `Join \"${titleText}\" using this link: ${meetingLink}\nBackup Meeting ID: ${meetingId}`;
+    const shareText = `Join "${titleText}" using this link: ${meetingLink}\nBackup Meeting ID: ${meetingId}`;
 
     if (navigator.share) {
       try {
@@ -183,7 +194,7 @@ export function MeetingScheduler({ isOpen, onClose }: { isOpen: boolean; onClose
 
   const shareOnWhatsApp = (meetingId: string, titleText: string) => {
     const meetingLink = buildMeetingLink(meetingId);
-    const message = encodeURIComponent(`Join \"${titleText}\" directly: ${meetingLink}\nBackup Meeting ID: ${meetingId}`);
+    const message = encodeURIComponent(`Join "${titleText}" directly: ${meetingLink}\nBackup Meeting ID: ${meetingId}`);
     window.open(`https://wa.me/?text=${message}`, '_blank', 'noopener,noreferrer');
   };
 

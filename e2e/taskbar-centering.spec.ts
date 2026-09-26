@@ -796,9 +796,6 @@ test.describe('Screen share: surface selection', () => {
       // Trigger the store's share flow so useWebRTC calls the (mocked) getDisplayMedia.
       // We flip the flag via the E2E hook, which the app watches.
       await page.evaluate(() => {
-        useMeetingStore; // no-op to hint bundler; store hook is on window via zustand devtools if enabled
-      }).catch(() => undefined);
-      await page.evaluate(() => {
         const hook = (window as typeof window & {
           __ZOOM_CONNECT_E2E__?: { simulateSelfCaptureShare?: (on: boolean) => void };
         }).__ZOOM_CONNECT_E2E__;

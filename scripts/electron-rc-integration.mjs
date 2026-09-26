@@ -65,7 +65,8 @@ const electronStub = {
     handle: (channel, fn) => ipcHandlers.set(channel, fn),
   },
   screen: {
-    getPrimaryDisplay: () => ({ size: { width: 1920, height: 1080 } }),
+    getPrimaryDisplay: () => ({ id: 1, bounds: { x: 0, y: 0, width: 1920, height: 1080 }, size: { width: 1920, height: 1080 }, scaleFactor: 1 }),
+    getAllDisplays: () => [],
   },
 };
 const origResolve = Module._resolveFilename;
@@ -83,10 +84,22 @@ const { registerRemoteControlHandler } = require(
 );
 registerRemoteControlHandler();
 const handler = ipcHandlers.get('remote-control:input');
+const startSession = ipcHandlers.get('remote-control:session-start');
 assert.ok(handler, 'handler registered on remote-control:input');
+assert.ok(startSession, 'handler registered on remote-control:session-start');
+
+// Input is refused until a control session is armed with a token.
+const TOKEN = 'harness-token-0123456789abcdef';
+const unarmed = await handler({}, { token: TOKEN, event: { type: 'mousemove', x: 0.5, y: 0.5 } });
+assert.strictEqual(unarmed.status, 'unarmed', 'input dropped before arming');
+const armed = await startSession({}, { token: TOKEN, controllerId: 'viewer-1', allowKeyboard: true });
+assert.ok(armed.ok, 'session armed');
+const badToken = await handler({}, { token: 'wrong-token-0123456789', event: { type: 'mousemove', x: 0.5, y: 0.5 } });
+assert.strictEqual(badToken.status, 'bad-token', 'input with the wrong token is dropped');
 
 async function invoke(event) {
-  await handler({}, event);
+  const result = await handler({}, { token: TOKEN, event });
+  assert.strictEqual(result.status, 'ok', `event ${event.type} executed (got ${result.status})`);
 }
 
 function firstCall(objLabel, method) {

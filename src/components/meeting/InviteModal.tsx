@@ -35,7 +35,7 @@ export function InviteModal() {
 
   const handleEmailShare = () => {
     window.open(
-      `mailto:?subject=Join my Zoom Connect meeting&body=Direct join link: ${meetingLink}%0A%0ABackup Meeting ID: ${meetingId}`
+      `mailto:?subject=Join my LiveDesk meeting&body=Direct join link: ${meetingLink}%0A%0ABackup Meeting ID: ${meetingId}`
     );
   };
 

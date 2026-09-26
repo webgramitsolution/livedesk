@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type RefObject } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   MousePointer2,
@@ -19,6 +19,8 @@ import type { UseRemoteControlReturn } from '@/hooks/useRemoteControl';
 import type { RCInputEvent } from '@/lib/remoteControl/protocol';
 import { RemoteControlSettingsPanel } from './RemoteControlSettingsPanel';
 import { cn } from '@/lib/utils';
+import { useVideoContentBox } from '@/hooks/useVideoContentBox';
+import { clientToNormalized } from '@/lib/annotation/geometry';
 
 interface RemoteControlOverlayProps {
   rc: UseRemoteControlReturn;
@@ -29,6 +31,10 @@ interface RemoteControlOverlayProps {
   presenterPeerId?: string | null;
   /** Collects per-peer transceiver/SSRC mapping for the validation panel. */
   getDiagnosticsSnapshot?: () => Promise<unknown>;
+  /** The shared-screen <video>; coordinates are normalized to its painted content box. */
+  videoRef?: RefObject<HTMLVideoElement | null>;
+  /** True while the annotation layer owns the pointer (no cursor/input is sent). */
+  suspended?: boolean;
 }
 
 interface PeerMappingRow {
@@ -99,12 +105,18 @@ export function RemoteControlOverlay({
   screenTrackLive = false,
   presenterPeerId = null,
   getDiagnosticsSnapshot,
+  videoRef,
+  suspended = false,
 }: RemoteControlOverlayProps) {
   const containerRef = useRef<HTMLDivElement>(null);
+  const fallbackVideoRef = useRef<HTMLVideoElement | null>(null);
+  // Painted content box of the shared video (letterbox/pillarbox aware).
+  const { box: contentBox } = useVideoContentBox(videoRef ?? fallbackVideoRef);
   const lastSentRef = useRef<{ t: number; x: number; y: number }>({ t: 0, x: -1, y: -1 });
   const [showSettings, setShowSettings] = useState(false);
   const [showMetrics, setShowMetrics] = useState(false);
   const [showMapping, setShowMapping] = useState(false);
+  const [showDiagnostics, setShowDiagnostics] = useState(false);
   const [mappingRows, setMappingRows] = useState<PeerMappingRow[] | null>(null);
   const [mappingLoading, setMappingLoading] = useState(false);
   const [mappingError, setMappingError] = useState<string | null>(null);
@@ -156,11 +168,18 @@ export function RemoteControlOverlay({
     if (showMapping) void loadMapping();
   }, [showMapping, loadMapping]);
 
-  const isControlling = status.state === 'controlling';
+  const isControlling = status.state === 'controlling' && !suspended;
 
-  // Convert client coordinates into normalized (0..1) coords relative to the overlay.
-  // Returns null if the cursor is outside the shared-screen area.
+  // Convert client coordinates into normalized (0..1) coords relative to the
+  // *painted presentation* (the video content box), so a 16:10 viewer looking
+  // at a 16:9 screen still maps onto the right presenter pixel. Falls back to
+  // the overlay box when no video element is available.
   const toNorm = useCallback((clientX: number, clientY: number) => {
+    const video = videoRef?.current;
+    if (video && contentBox.width > 0 && contentBox.height > 0) {
+      const rect = video.getBoundingClientRect();
+      return clientToNormalized(clientX, clientY, { left: rect.left, top: rect.top }, contentBox, false);
+    }
     const el = containerRef.current;
     if (!el) return null;
     const rect = el.getBoundingClientRect();
@@ -175,11 +194,30 @@ export function RemoteControlOverlay({
     const x = (clientX - rect.left) / Math.max(rect.width, 1);
     const y = (clientY - rect.top) / Math.max(rect.height, 1);
     return { x, y };
-  }, []);
+  }, [videoRef, contentBox]);
+
+  // Remote cursors and ripples are positioned inside the same content box.
+  const cursorStyle = useCallback(
+    (x: number, y: number) => {
+      const video = videoRef?.current;
+      const el = containerRef.current;
+      if (video && el && contentBox.width > 0) {
+        const vr = video.getBoundingClientRect();
+        const cr = el.getBoundingClientRect();
+        return {
+          left: vr.left - cr.left + contentBox.x + x * contentBox.width,
+          top: vr.top - cr.top + contentBox.y + y * contentBox.height,
+        };
+      }
+      return { left: `${x * 100}%`, top: `${y * 100}%` };
+    },
+    [videoRef, contentBox],
+  );
 
   // --- Live cursor broadcast (throttled ~30Hz) via document listeners so
   // the overlay never blocks presenter controls like "Stop Sharing". ---
   useEffect(() => {
+    if (suspended) return;
     const onMove = (e: PointerEvent) => {
       const norm = toNorm(e.clientX, e.clientY);
       const now = performance.now();
@@ -204,7 +242,7 @@ export function RemoteControlOverlay({
     return () => {
       document.removeEventListener('pointermove', onMove);
     };
-  }, [isControlling, sendCursor, sendInput, toNorm, tuning?.cursorSendMinMs]);
+  }, [isControlling, sendCursor, sendInput, toNorm, tuning?.cursorSendMinMs, suspended]);
 
   // --- Click / mouse buttons ---
   const buttonMap = useCallback((b: number): 'left' | 'right' | 'middle' => {
@@ -217,6 +255,7 @@ export function RemoteControlOverlay({
   // presenter clicking their own Stop Sharing button will produce a ripple —
   // that's fine, it just visualizes clicks for everyone in the meeting).
   useEffect(() => {
+    if (suspended) return;
     const onDown = (e: PointerEvent) => {
       const norm = toNorm(e.clientX, e.clientY);
       if (!norm) return;
@@ -247,13 +286,12 @@ export function RemoteControlOverlay({
       document.removeEventListener('pointerup', onUp);
       document.removeEventListener('wheel', onWheel);
     };
-  }, [buttonMap, isControlling, sendInput, sendRipple, toNorm]);
+  }, [buttonMap, isControlling, sendInput, sendRipple, toNorm, suspended]);
 
   // --- Keyboard capture while controlling ---
   useEffect(() => {
-    if (!isControlling) return;
-    const allowKeyboard = status.state === 'controlling' ? status.allowKeyboard : false;
-    if (!allowKeyboard) return;
+    if (status.state !== 'controlling') return;
+    const allowKeyboard = status.allowKeyboard;
 
     const buildKey = (e: KeyboardEvent, type: 'keydown' | 'keyup'): RCInputEvent => ({
       type,
@@ -267,13 +305,18 @@ export function RemoteControlOverlay({
 
     const onKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
-        // Local escape hatch: give up control.
+        // Emergency release works in every mode, keyboard permission or not.
+        e.preventDefault();
         releaseControl();
         return;
       }
+      if (!allowKeyboard || suspended) return;
+      e.preventDefault();
       sendInput(buildKey(e, 'keydown'));
     };
     const onKeyUp = (e: KeyboardEvent) => {
+      if (!allowKeyboard || suspended) return;
+      e.preventDefault();
       sendInput(buildKey(e, 'keyup'));
     };
 
@@ -283,7 +326,7 @@ export function RemoteControlOverlay({
       window.removeEventListener('keydown', onKeyDown);
       window.removeEventListener('keyup', onKeyUp);
     };
-  }, [isControlling, releaseControl, sendInput, status]);
+  }, [releaseControl, sendInput, status, suspended]);
 
   const cursorList = useMemo(
     () => Array.from(remoteCursors.values()).filter((c) => c.visible),
@@ -327,8 +370,7 @@ export function RemoteControlOverlay({
           // tunable so hosts can dial jitter smoothing per network condition.
           className="absolute pointer-events-none will-change-transform"
           style={{
-            left: `${c.x * 100}%`,
-            top: `${c.y * 100}%`,
+            ...cursorStyle(c.x, c.y),
             transform: 'translate(-4px, -4px)',
             transition: `left ${tuning?.cursorSmoothingMs ?? 150}ms ease-out, top ${tuning?.cursorSmoothingMs ?? 150}ms ease-out`,
           }}
@@ -359,8 +401,7 @@ export function RemoteControlOverlay({
             transition={{ duration: 0.85, ease: 'easeOut' }}
             className="absolute pointer-events-none rounded-full"
             style={{
-              left: `${r.x * 100}%`,
-              top: `${r.y * 100}%`,
+              ...cursorStyle(r.x, r.y),
               width: 32,
               height: 32,
               marginLeft: -16,
@@ -423,6 +464,17 @@ export function RemoteControlOverlay({
       <div className="absolute top-3 right-3 pointer-events-auto flex flex-col items-end gap-2">
         <div className="flex items-center gap-1">
           <button
+            onClick={() => setShowDiagnostics((v) => !v)}
+            title="Remote control diagnostics"
+            aria-label="Remote control diagnostics"
+            aria-expanded={showDiagnostics}
+            className="inline-flex h-6 w-6 items-center justify-center rounded-full border border-border bg-background/70 text-muted-foreground shadow hover:bg-muted backdrop-blur"
+          >
+            <Activity className="h-3 w-3" />
+          </button>
+          {showDiagnostics && (
+          <>
+          <button
             onClick={() => setShowMetrics((v) => !v)}
             title="Toggle live control metrics"
             className="inline-flex items-center gap-1 rounded-full border border-border bg-background/80 px-2.5 py-1 text-[10px] font-medium text-muted-foreground shadow hover:bg-muted backdrop-blur"
@@ -444,6 +496,8 @@ export function RemoteControlOverlay({
           >
             <Layers className="h-3 w-3" /> Mapping
           </button>
+          </>
+          )}
         </div>
 
         {/* Permission handshake status + exact failure reason */}
@@ -638,7 +692,7 @@ export function RemoteControlOverlay({
           shown so the presenter can grant/deny each one predictably. Granting
           one automatically denies the rest to avoid conflicts. */}
       {isLocalPresenter && requestQueue.length > 0 && (
-        <div className="absolute inset-x-0 top-3 flex justify-center pointer-events-none">
+        <div className="absolute inset-x-0 top-14 flex justify-center pointer-events-none">
           <div className="pointer-events-auto flex flex-col gap-2 rounded-2xl border border-border bg-background/95 p-3 shadow-xl backdrop-blur max-w-md w-full">
             <div className="flex items-center justify-between">
               <span className="text-sm font-semibold text-foreground">

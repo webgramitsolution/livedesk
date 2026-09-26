@@ -116,8 +116,11 @@ describe('unrelated findings must remain unchanged', () => {
   it('meeting presence and join-request access rules are untouched', () => {
     const hook = read('src/hooks/useWebRTC.ts');
     expect(hook).toMatch(/meeting_presence/);
-    // Presence is still written via the upsert pattern introduced earlier.
-    expect(hook).toMatch(/upsert/);
+    // Presence rows are still written by the presence manager (select, then insert or update).
+    const presence = read('src/components/meeting/MeetingPresenceManager.tsx');
+    expect(presence).toMatch(/meeting_presence/);
+    expect(presence).toMatch(/\.insert\(/);
+    expect(presence).toMatch(/\.update\(/);
   });
 
   it('remote-control signing, nonce and replay protection are untouched', () => {
