@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type RefObject } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   MousePointer2,
@@ -29,6 +29,10 @@ interface RemoteControlOverlayProps {
   presenterPeerId?: string | null;
   /** Collects per-peer transceiver/SSRC mapping for the validation panel. */
   getDiagnosticsSnapshot?: () => Promise<unknown>;
+  /** The shared-screen <video>; coordinates are normalized to its painted content box. */
+  videoRef?: RefObject<HTMLVideoElement | null>;
+  /** True while the annotation layer owns the pointer (no cursor/input is sent). */
+  suspended?: boolean;
 }
 
 interface PeerMappingRow {

@@ -113,6 +113,8 @@ interface MeetingState {
   isCameraOn: boolean;
   isScreenSharing: boolean;
   isSelfCapture: boolean;
+  /** Annotation drawing mode (tools active over the presentation). */
+  isAnnotating: boolean;
   isRecording: boolean;
   recordingStartTime: number | null;
   meetingJoinedAt: number | null;
@@ -157,6 +159,8 @@ interface MeetingState {
   toggleMic: () => void;
   toggleCamera: () => void;
   toggleScreenShare: () => void;
+  setAnnotating: (on: boolean) => void;
+  toggleAnnotating: () => void;
   setSelfCapture: (v: boolean) => void;
   toggleRecording: () => void;
   toggleTranslation: () => void;
@@ -352,6 +356,7 @@ export const useMeetingStore = create<MeetingState>((set, get) => ({
   isCameraOn: persistedMeetingState?.isCameraOn ?? true,
   isScreenSharing: false,
   isSelfCapture: false,
+  isAnnotating: false,
   isRecording: false,
   recordingStartTime: null,
   meetingJoinedAt: persistedMeetingState?.meetingJoinedAt ?? null,
@@ -394,6 +399,8 @@ export const useMeetingStore = create<MeetingState>((set, get) => ({
   toggleMic: () => set((s) => ({ isMicOn: !s.isMicOn })),
   toggleCamera: () => set((s) => ({ isCameraOn: !s.isCameraOn })),
   toggleScreenShare: () => set((s) => ({ isScreenSharing: !s.isScreenSharing })),
+  setAnnotating: (isAnnotating) => set({ isAnnotating }),
+  toggleAnnotating: () => set((s) => ({ isAnnotating: !s.isAnnotating })),
   setSelfCapture: (v) => set({ isSelfCapture: v }),
   toggleRecording: () =>
     set((s) => ({
@@ -607,6 +614,7 @@ export const useMeetingStore = create<MeetingState>((set, get) => ({
       meetingSessionId: '',
       isScreenSharing: false,
       isSelfCapture: false,
+      isAnnotating: false,
       isRecording: false,
       recordingStartTime: null,
       meetingJoinedAt: null,

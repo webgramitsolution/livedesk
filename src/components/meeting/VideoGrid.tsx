@@ -1,11 +1,12 @@
 import { useMeetingStore } from '@/store/meetingStore';
 import { VideoTile } from './VideoTile';
-import { WhiteboardOverlay } from './WhiteboardOverlay';
+import { AnnotationOverlay } from './AnnotationOverlay';
 import { motion } from 'framer-motion';
 import { Monitor, X, PenTool } from 'lucide-react';
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, forwardRef, useImperativeHandle } from 'react';
 import { RemoteControlOverlay } from './RemoteControlOverlay';
 import { useRemoteControl } from '@/hooks/useRemoteControl';
+import { useAnnotations } from '@/hooks/useAnnotations';
 import { executeInput } from '@/lib/remoteControl/inputExecutor';
 
 interface VideoGridProps {
@@ -17,8 +18,12 @@ interface VideoGridProps {
   getDiagnosticsSnapshot?: () => Promise<unknown>;
 }
 
-function ScreenShareVideo({ stream, isLocal }: { stream: MediaStream; isLocal?: boolean }) {
+const ScreenShareVideo = forwardRef<HTMLVideoElement, { stream: MediaStream; isLocal?: boolean }>(function ScreenShareVideo(
+  { stream, isLocal },
+  ref,
+) {
   const videoRef = useRef<HTMLVideoElement>(null);
+  useImperativeHandle(ref, () => videoRef.current as HTMLVideoElement);
 
   useEffect(() => {
     if (videoRef.current && stream) {
@@ -35,16 +40,44 @@ function ScreenShareVideo({ stream, isLocal }: { stream: MediaStream; isLocal?: 
       autoPlay
       playsInline
       muted={!!isLocal}
+      data-testid="screen-share-video"
       className="w-full h-full object-contain"
     />
   );
-}
+});
 
 export function VideoGrid({ localStream, remoteStreams, screenStream, remoteScreenStream, remoteScreenPeerId, getDiagnosticsSnapshot }: VideoGridProps) {
   const { participants, transcript, isTranslationEnabled, isScreenSharing, isSelfCapture, toggleScreenShare, selectedLanguage, meetingId } =
     useMeetingStore();
-  const [whiteboardActive, setWhiteboardActive] = useState(false);
-  const [toolbarPortalWindow, setToolbarPortalWindow] = useState<Window | null>(null);
+  const meetingSessionId = useMeetingStore((s) => s.meetingSessionId);
+  const isAnnotating = useMeetingStore((s) => s.isAnnotating);
+  const setAnnotating = useMeetingStore((s) => s.setAnnotating);
+  const permissionRows = useMeetingStore((s) => s.session.permissionRows);
+  const meetingControls = useMeetingStore((s) => s.session.meetingControls);
+  const hostUserId = useMeetingStore((s) => s.session.hostUserId);
+  const myUserId = useMeetingStore((s) => s.session.myUserId);
+  const screenVideoRef = useRef<HTMLVideoElement | null>(null);
+
+  // Effective permissions (recomputed when rows / controls / host change).
+  const myPermission = useMeetingStore.getState().myPermission();
+  const isHost = !!myUserId && myUserId === hostUserId;
+  const annotationsEnabled = meetingControls.annotationEnabled || isHost;
+  const canAnnotate = myPermission.canAnnotate && annotationsEnabled;
+  const annotationDisabledReason = !meetingControls.annotationEnabled && !isHost
+    ? 'The host disabled annotation for everyone'
+    : !myPermission.canAnnotate
+      ? 'Ask the host to allow annotation'
+      : undefined;
+  void permissionRows; // subscription only: keeps this component in sync with permission changes
+
+  // Presentation identity for annotations: the presenter's session id.
+  const presenterId = isScreenSharing ? meetingSessionId : remoteScreenPeerId ?? null;
+  const annotations = useAnnotations({ presenterId, enabled: !!presenterId });
+
+  // Leave drawing mode when the share ends or permission is withdrawn.
+  useEffect(() => {
+    if (isAnnotating && (!presenterId || !canAnnotate)) setAnnotating(false);
+  }, [isAnnotating, presenterId, canAnnotate, setAnnotating]);
 
   // Remote-control: overlay is active whenever there is a shared screen
   // (local or remote). The overlay both broadcasts our cursor and, when
@@ -121,35 +154,13 @@ export function VideoGrid({ localStream, remoteStreams, screenStream, remoteScre
     return remoteStreams?.get(p.id) || null;
   };
 
-  useEffect(() => {
-    if (!isScreenSharing) {
-      setWhiteboardActive(false);
-      setToolbarPortalWindow(null);
-    }
-  }, [isScreenSharing]);
-
-  useEffect(() => {
-    if (!isScreenSharing || typeof window === 'undefined') return;
-
-    const handleFocus = () => {
-      if (window.opener && !window.opener.closed) {
-        setToolbarPortalWindow(window);
-      }
-    };
-
-    handleFocus();
-    window.addEventListener('focus', handleFocus);
-    return () => window.removeEventListener('focus', handleFocus);
-  }, [isScreenSharing]);
-
   if (isScreenSharing || remoteScreenStream) {
     return (
       <div className="flex-1 flex flex-col gap-2 p-3 overflow-hidden">
         {/* Main screen share area */}
         <div className="flex-1 relative rounded-xl overflow-hidden bg-background min-h-0">
-          {whiteboardActive && <WhiteboardOverlay onClose={() => setWhiteboardActive(false)} portalWindow={toolbarPortalWindow} />}
           {activeScreenStream && !suppressLocalPreview ? (
-            <ScreenShareVideo stream={activeScreenStream} isLocal={!!screenStream} />
+            <ScreenShareVideo ref={screenVideoRef} stream={activeScreenStream} isLocal={!!screenStream} />
           ) : (
             <div
               className="w-full h-full bg-gradient-to-br from-muted to-muted/60 flex flex-col items-center justify-center gap-3"
@@ -178,28 +189,45 @@ export function VideoGrid({ localStream, remoteStreams, screenStream, remoteScre
               )}
             </div>
           )}
-          {/* Remote-control cursor + input overlay */}
+          {/* Remote-control cursor + input overlay (suspended while drawing) */}
           <RemoteControlOverlay
             rc={rc}
             meetingId={meetingId}
             screenTrackLive={remoteScreenTrackLive}
             presenterPeerId={remoteScreenPeerId}
             getDiagnosticsSnapshot={getDiagnosticsSnapshot}
+            videoRef={screenVideoRef}
+            suspended={isAnnotating}
           />
+          {/* Collaborative annotation layer (vector, normalized coordinates) */}
+          {presenterId && activeScreenStream && !suppressLocalPreview && (
+            <AnnotationOverlay
+              videoRef={screenVideoRef}
+              annotations={annotations}
+              sessionId={meetingSessionId}
+              active={isAnnotating}
+              onSetActive={setAnnotating}
+              canAnnotate={canAnnotate}
+              canClearAll={isHost || isScreenSharing}
+              disabledReason={annotationDisabledReason}
+            />
+          )}
           {isScreenSharing && (
             <div className="pointer-events-none absolute bottom-4 inset-x-0 mx-auto z-20 flex w-[min(calc(100%-1rem),28rem)] justify-center">
               <div className="pointer-events-auto flex items-center gap-2 rounded-full border border-border bg-background/95 px-2.5 py-2 backdrop-blur-md control-bar-elevated">
               <motion.button
                 whileTap={{ scale: 0.95 }}
-                onClick={() => setWhiteboardActive(!whiteboardActive)}
-                className={`flex items-center gap-2 rounded-full px-4 py-2 text-sm font-medium transition-colors ${
-                  whiteboardActive
+                onClick={() => setAnnotating(!isAnnotating)}
+                disabled={!canAnnotate}
+                title={annotationDisabledReason}
+                className={`flex items-center gap-2 rounded-full px-4 py-2 text-sm font-medium transition-colors disabled:opacity-50 ${
+                  isAnnotating
                     ? 'bg-primary text-primary-foreground hover:bg-primary/90'
                     : 'bg-secondary text-foreground hover:bg-secondary/80'
                 }`}
               >
                 <PenTool className="w-4 h-4" />
-                {whiteboardActive ? 'Hide Whiteboard' : 'Annotate'}
+                {isAnnotating ? 'Stop annotating' : 'Annotate'}
               </motion.button>
               <motion.button
                 whileTap={{ scale: 0.95 }}
