@@ -17,6 +17,25 @@ import { validateRCMessage } from '@/lib/remoteControl/validation';
 import { loadRCTuning, DEFAULT_RC_TUNING, type RCTuning } from '@/lib/remoteControl/settings';
 import { loadRCState, saveRCState, clearRCState } from '@/lib/remoteControl/persistence';
 
+/**
+ * Transport used for control messages. The default rides on the Supabase
+ * signaling channel; the meeting passes a data-plane transport so cursor and
+ * input events travel peer-to-peer over the RTCDataChannel.
+ */
+export interface RCTransport {
+  send: (payload: RCMessage & { msgId: string; ts: number; sig: string }) => void;
+  subscribe: (handler: (raw: unknown) => void) => () => void;
+  /** Optional link-state feed used to revoke control the moment a peer's channel drops. */
+  onPeerLink?: (handler: (peerId: string, state: 'open' | 'closed' | 'connecting') => void) => () => void;
+}
+
+export type GrantAuthorizer = (
+  controllerId: string,
+  mode: 'mouse' | 'mouse+keyboard',
+) => Promise<{ token: string } | { error: string }>;
+
+export type RevokeNotifier = (controllerId: string, reason: string) => Promise<void> | void;
+
 export interface RemoteCursor {
   id: string;
   name: string;
@@ -69,6 +88,17 @@ export interface RCMetrics {
 }
 
 const CURSOR_STALE_MS = 4000;
+
+// Permission lookups tolerate a partially mocked store (unit tests mock the
+// hook as a bare selector function).
+type PermissionReader = {
+  permissionFor?: (id: string) => { canRequestRemoteControl: boolean };
+  myPermission?: () => { canRequestRemoteControl: boolean };
+};
+function readPermissionStore(): PermissionReader {
+  const store = useMeetingStore as unknown as { getState?: () => PermissionReader };
+  return typeof store.getState === 'function' ? store.getState() : {};
+}
 const REQUEST_TIMEOUT_MS = 30_000;
 
 interface UseRemoteControlOptions {
@@ -76,12 +106,35 @@ interface UseRemoteControlOptions {
   isInMeeting: boolean;
   isLocalPresenter: boolean; // true when we are sharing a screen
   presenterHintId?: string | null;
-  onExecuteInput?: (event: RCInputEvent, fromName: string) => void;
+  onExecuteInput?: (event: RCInputEvent, fromName: string, token: string) => void;
   tuning?: RCTuning;
+  transport?: RCTransport;
+  /** Issues the control token (server-side grant). Defaults to a local nonce when absent. */
+  authorizeGrant?: GrantAuthorizer;
+  /** Records a revoke server-side (best effort). */
+  notifyRevoke?: RevokeNotifier;
+  /** Called when a control session starts/ends on this presenter (for OS-level arming). */
+  onControlSession?: (session: { token: string; controllerId: string; controllerName: string; allowKeyboard: boolean } | null) => void;
 }
 
 export function useRemoteControl(options: UseRemoteControlOptions) {
-  const { meetingId, isInMeeting, isLocalPresenter, presenterHintId, onExecuteInput } = options;
+  const { meetingId, isInMeeting, isLocalPresenter, presenterHintId, onExecuteInput, transport, authorizeGrant, notifyRevoke, onControlSession } = options;
+  const transportRef = useRef(transport);
+  useEffect(() => {
+    transportRef.current = transport;
+  }, [transport]);
+  const authorizeGrantRef = useRef(authorizeGrant);
+  useEffect(() => {
+    authorizeGrantRef.current = authorizeGrant;
+  }, [authorizeGrant]);
+  const notifyRevokeRef = useRef(notifyRevoke);
+  useEffect(() => {
+    notifyRevokeRef.current = notifyRevoke;
+  }, [notifyRevoke]);
+  const onControlSessionRef = useRef(onControlSession);
+  useEffect(() => {
+    onControlSessionRef.current = onControlSession;
+  }, [onControlSession]);
   const sessionId = useMeetingStore((s) => s.meetingSessionId);
   const userName = useMeetingStore((s) => s.userName) || 'You';
 
@@ -234,8 +287,12 @@ export function useRemoteControl(options: UseRemoteControlOptions) {
   }, []);
 
   const send = useCallback((msg: RCMessage) => {
-    if (!channelRef.current || !readyRef.current) return;
     const signed = wrapRC(msg, optionsMeetingIdRef.current);
+    if (transportRef.current) {
+      transportRef.current.send(signed);
+      return;
+    }
+    if (!channelRef.current || !readyRef.current) return;
     channelRef.current.send({ type: 'broadcast', event: RC_EVENT, payload: signed });
   }, []);
 
@@ -340,6 +397,15 @@ export function useRemoteControl(options: UseRemoteControlOptions) {
         case 'request': {
           if (msg.to !== sessionId) return;
           if (!isLocalPresenterRef.current) return;
+          // Permission gate: the requester must be allowed to request control
+          // and remote control must be enabled for the meeting (both come from
+          // the server-backed permission rows, never from the peer).
+          const perm = readPermissionStore().permissionFor?.(msg.from);
+          if (perm && !perm.canRequestRemoteControl) {
+            send({ kind: 'deny', from: sessionId, to: msg.from, reason: 'Remote control is not allowed for you in this meeting' });
+            logRCAudit({ action: 'deny', actorId: sessionId, targetId: msg.from, reason: 'permission', meetingId });
+            break;
+          }
           // Dedup synchronously via ref so we don't double-log audit
           // entries when a viewer's request message arrives more than once
           // (React batches the queue setter, so a functional dedup inside
@@ -442,11 +508,14 @@ export function useRemoteControl(options: UseRemoteControlOptions) {
             bumpDropped('unauthorized');
             return;
           }
-          // Presenter revoked our control.
+          // Presenter revoked our control, or the controller released it.
           setStatus({ state: 'idle' });
           setLastFailureReason(msg.reason ?? 'Presenter ended the remote control session');
           if (activeControllerRef.current?.id === msg.from) {
             setActiveController(null);
+            onControlSessionRef.current?.(null);
+            broadcastLock(null);
+            void notifyRevokeRef.current?.(msg.from, msg.reason ?? 'Controller released control');
           }
           toast.info('Remote control ended.');
           logRCAudit({
@@ -471,12 +540,12 @@ export function useRemoteControl(options: UseRemoteControlOptions) {
             bumpDropped('unauthorized');
             return;
           }
-          onExecuteInputRef.current?.(msg.event, active.name);
+          onExecuteInputRef.current?.(msg.event, active.name, active.nonce);
           break;
         }
       }
     },
-    [sessionId, meetingId, bumpDropped],
+    [sessionId, meetingId, bumpDropped, send, broadcastLock],
   );
 
   // Subscribe to signaling channel.
@@ -484,27 +553,51 @@ export function useRemoteControl(options: UseRemoteControlOptions) {
     if (!isInMeeting || !meetingId || !sessionId) return;
     // Rehydrate from a recent local snapshot on (re)mount so a brief
     // disconnect doesn't lose the queue, lock, or pending request.
+    // A control session is NEVER restored silently: only the pending request
+    // queue and an outstanding request of our own survive a reload. Anything
+    // that granted OS-level input must be re-approved by the presenter.
     const persisted = loadRCState(meetingId, sessionId);
     if (persisted) {
       setRequestQueue(persisted.requestQueue ?? []);
-      setActiveController(persisted.activeController ?? null);
-      setControlLock(persisted.controlLock ?? null);
-      setStatus(persisted.status ?? { state: 'idle' });
-      const nonTrivial =
-        (persisted.requestQueue?.length ?? 0) > 0 ||
-        !!persisted.activeController ||
-        !!persisted.controlLock ||
-        (persisted.status?.state && persisted.status.state !== 'idle');
+      setActiveController(null);
+      setControlLock(null);
+      const wasControlling = persisted.status?.state === 'controlling';
+      const wasRequesting = persisted.status?.state === 'requesting';
+      setStatus(wasRequesting ? persisted.status : { state: 'idle' });
+      if (wasControlling || persisted.activeController) {
+        setLastFailureReason('Remote control session ended by reconnect. Ask for control again.');
+      }
+      const nonTrivial = (persisted.requestQueue?.length ?? 0) > 0 || wasRequesting || wasControlling;
       if (nonTrivial) {
         setSessionRestored({
           at: Date.now(),
           queueSize: persisted.requestQueue?.length ?? 0,
-          hadLock: !!persisted.controlLock,
-          wasControlling: persisted.status?.state === 'controlling',
-          wasRequesting: persisted.status?.state === 'requesting',
+          hadLock: false,
+          wasControlling: false,
+          wasRequesting,
         });
       }
     }
+    const reissueRequest = () => {
+      if (persisted?.status?.state === 'requesting') {
+        // We had a pending request: re-issue it so the presenter can (re)notify
+        // us (the presenter's queue is de-duplicated by sender id).
+        const p = persisted.status as { state: 'requesting'; presenterId: string };
+        send({ kind: 'request', from: sessionId, name: userNameRef.current, to: p.presenterId });
+      }
+    };
+
+    const currentTransport = transportRef.current;
+    if (currentTransport) {
+      const unsubscribe = currentTransport.subscribe((raw) => handleMessage(raw));
+      readyRef.current = true;
+      reissueRequest();
+      return () => {
+        readyRef.current = false;
+        unsubscribe();
+      };
+    }
+
     const channel = supabase.channel(`webrtc-${meetingId}`, {
       config: { broadcast: { self: false } },
     });
@@ -514,9 +607,6 @@ export function useRemoteControl(options: UseRemoteControlOptions) {
       .subscribe((s) => {
         readyRef.current = s === 'SUBSCRIBED';
         if (s === 'SUBSCRIBED' && persisted?.status?.state === 'requesting') {
-          // We had a pending request — re-issue the request so the presenter
-          // can (re)notify us without a duplicate row on their side (the
-          // presenter's queue is deduped by sender id).
           const p = persisted.status as { state: 'requesting'; presenterId: string };
           channel.send({
             type: 'broadcast',
@@ -530,7 +620,33 @@ export function useRemoteControl(options: UseRemoteControlOptions) {
       supabase.removeChannel(channel);
       channelRef.current = null;
     };
-  }, [handleMessage, isInMeeting, meetingId, sessionId]);
+  }, [handleMessage, isInMeeting, meetingId, sessionId, send]);
+
+  // Link loss revokes control immediately (never re-established silently).
+  useEffect(() => {
+    if (!isInMeeting) return;
+    const feed = transportRef.current?.onPeerLink;
+    if (!feed) return;
+    return feed((peerId, state) => {
+      if (state !== 'closed') return;
+      const ac = activeControllerRef.current;
+      if (ac && ac.id === peerId) {
+        setActiveController(null);
+        onControlSessionRef.current?.(null);
+        broadcastLock(null);
+        setLastFailureReason('Controller connection lost; remote control ended');
+        void notifyRevokeRef.current?.(peerId, 'Controller connection lost');
+        logRCAudit({ action: 'auto-revoke', actorId: sessionId, targetId: peerId, reason: 'link-lost', meetingId });
+        toast.info('Remote control ended: the controller disconnected.');
+      }
+      const st = statusRef.current;
+      if (st.state === 'controlling' && st.presenterId === peerId) {
+        setStatus({ state: 'idle' });
+        setLastFailureReason('Connection to the presenter was lost; control ended');
+        toast.info('Remote control ended: connection to the presenter was lost.');
+      }
+    });
+  }, [isInMeeting, broadcastLock, sessionId, meetingId]);
 
   // Persist queue / lock / status snapshots so a reconnect resumes cleanly.
   useEffect(() => {
@@ -610,6 +726,8 @@ export function useRemoteControl(options: UseRemoteControlOptions) {
         reason: 'Presenter stopped sharing',
         meetingId,
       });
+      void notifyRevokeRef.current?.(activeControllerRef.current.id, 'Presenter stopped sharing');
+      onControlSessionRef.current?.(null);
       broadcastLock(null);
     }
   }, [isLocalPresenter, sessionId, send, broadcastLock, meetingId]);
@@ -635,6 +753,12 @@ export function useRemoteControl(options: UseRemoteControlOptions) {
 
   const requestControl = useCallback(() => {
     if (!remotePresenterId || !sessionId) return;
+    const perm = readPermissionStore().myPermission?.();
+    if (perm && !perm.canRequestRemoteControl) {
+      setLastFailureReason('Remote control requests are not allowed for you in this meeting');
+      toast.error('Remote control is not allowed for you in this meeting.');
+      return;
+    }
     setStatus({ state: 'requesting', presenterId: remotePresenterId, since: Date.now() });
     setMetrics((m) => ({ ...m, requestsSent: m.requestsSent + 1 }));
     send({ kind: 'request', from: sessionId, name: userName, to: remotePresenterId });
@@ -665,16 +789,32 @@ export function useRemoteControl(options: UseRemoteControlOptions) {
   const releaseControl = useCallback(() => {
     const st = statusRef.current;
     if (st.state !== 'controlling') return;
-    send({ kind: 'revoke', from: sessionId, to: st.presenterId });
+    send({ kind: 'revoke', from: sessionId, to: st.presenterId, reason: 'Controller released control' });
     setStatus({ state: 'idle' });
     logRCAudit({ action: 'revoke', actorId: sessionId, targetId: st.presenterId, meetingId });
+    void notifyRevokeRef.current?.(sessionId, 'Controller released control');
   }, [sessionId, send, meetingId]);
 
   const grantRequest = useCallback(
-    (fromId: string, allowKeyboard: boolean) => {
+    async (fromId: string, allowKeyboard: boolean) => {
       const target = requestQueue.find((r) => r.from === fromId);
       if (!target) return;
-      const nonce = newNonce();
+      const mode = allowKeyboard ? 'mouse+keyboard' : 'mouse';
+      let nonce = newNonce();
+      const authorize = authorizeGrantRef.current;
+      if (authorize) {
+        // Server-issued token: the grant is recorded and can be revoked by the host.
+        const result = await authorize(target.from, mode);
+        if ('error' in result) {
+          send({ kind: 'deny', from: sessionId, to: target.from, reason: result.error });
+          setRequestQueue((prev) => prev.filter((r) => r.from !== target.from));
+          requestQueueRef.current = requestQueueRef.current.filter((r) => r.from !== target.from);
+          logRCAudit({ action: 'deny', actorId: sessionId, targetId: target.from, reason: result.error, meetingId });
+          toast.error(`Could not grant control: ${result.error}`);
+          return;
+        }
+        nonce = result.token;
+      }
       const controller = {
         id: target.from,
         name: target.name,
@@ -705,6 +845,7 @@ export function useRemoteControl(options: UseRemoteControlOptions) {
       setRequestQueue([]);
       requestQueueRef.current = [];
       broadcastLock({ id: controller.id, name: controller.name, allowKeyboard });
+      onControlSessionRef.current?.({ token: nonce, controllerId: controller.id, controllerName: controller.name, allowKeyboard });
       logRCAudit({
         action: 'grant',
         actorId: sessionId,
@@ -728,9 +869,11 @@ export function useRemoteControl(options: UseRemoteControlOptions) {
     [sessionId, send, meetingId],
   );
 
-  const reclaimControl = useCallback(() => {
+  const reclaimControl = useCallback((reason = 'Presenter reclaimed control') => {
     if (!activeController) return;
-    send({ kind: 'revoke', from: sessionId, to: activeController.id, reason: 'Presenter reclaimed control' });
+    send({ kind: 'revoke', from: sessionId, to: activeController.id, reason });
+    void notifyRevokeRef.current?.(activeController.id, reason);
+    onControlSessionRef.current?.(null);
     logRCAudit({
       action: 'reclaim',
       actorId: sessionId,
@@ -824,6 +967,47 @@ export function useRemoteControl(options: UseRemoteControlOptions) {
     };
   }, [isInMeeting]);
 
+  /**
+   * End the current control session because an external authority (host via
+   * the server, token expiry) revoked it. Works on both sides and does not
+   * call the server back.
+   */
+  const forceEnd = useCallback(
+    (reason: string) => {
+      const ac = activeControllerRef.current;
+      if (ac) {
+        send({ kind: 'revoke', from: sessionId, to: ac.id, reason });
+        setActiveController(null);
+        onControlSessionRef.current?.(null);
+        broadcastLock(null);
+        logRCAudit({ action: 'auto-revoke', actorId: sessionId, targetId: ac.id, targetName: ac.name, reason, meetingId });
+        toast.info(`Remote control ended: ${reason}`);
+      }
+      const st = statusRef.current;
+      if (st.state === 'controlling') {
+        setStatus({ state: 'idle' });
+        setLastFailureReason(reason);
+        toast.info(`Remote control ended: ${reason}`);
+      }
+    },
+    [broadcastLock, meetingId, send, sessionId],
+  );
+
+  // Leaving the meeting (unmount) ends any control session in both directions.
+  useEffect(() => {
+    return () => {
+      const ac = activeControllerRef.current;
+      if (ac && sessionId) {
+        send({ kind: 'revoke', from: sessionId, to: ac.id, reason: 'Presenter left the meeting' });
+        onControlSessionRef.current?.(null);
+      }
+      const st = statusRef.current;
+      if (st.state === 'controlling' && sessionId) {
+        send({ kind: 'revoke', from: sessionId, to: st.presenterId, reason: 'Controller left the meeting' });
+      }
+    };
+  }, [send, sessionId]);
+
   return {
     lastFailureReason,
     reattachInfo,
@@ -850,7 +1034,7 @@ export function useRemoteControl(options: UseRemoteControlOptions) {
     releaseControl,
     grantIncoming: (allowKeyboard: boolean) => {
       const first = requestQueue[0];
-      if (first) grantRequest(first.from, allowKeyboard);
+      if (first) void grantRequest(first.from, allowKeyboard);
     },
     denyIncoming: (reason?: string) => {
       const first = requestQueue[0];
@@ -859,6 +1043,7 @@ export function useRemoteControl(options: UseRemoteControlOptions) {
     grantRequest,
     denyRequest,
     reclaimControl,
+    forceEnd,
     sendInput,
     sessionRestored,
     /** Exposed for automated tests to inject validated messages. */

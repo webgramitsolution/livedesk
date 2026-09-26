@@ -15,6 +15,7 @@ import { PerformanceHud } from './PerformanceHud';
 import { AlignmentDebugOverlay } from './AlignmentDebugOverlay';
 import { MobileSubmenus } from './MobileSubmenus';
 import { MediaDiagnosticsPanel } from './MediaDiagnosticsPanel';
+import { ElectronSourcePicker } from './ElectronSourcePicker';
 import { useSwipeGesture } from '@/hooks/useSwipeGesture';
 import { useIsMobile } from '@/hooks/use-mobile';
 import { useWebRTC } from '@/hooks/useWebRTC';
@@ -168,6 +169,7 @@ export function MeetingRoom() {
       <MediaDiagnosticsPanel onSelectDevices={selectLocalDevices} getDiagnosticsSnapshot={getDiagnosticsSnapshot} />
       <AlignmentDebugOverlay />
       <MobileSubmenus />
+      <ElectronSourcePicker />
 
       {soundUnlockVisible && (
         <button

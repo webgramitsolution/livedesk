@@ -1,0 +1,29 @@
+appId: com.webgram.livedesk
+productName: LiveDesk
+directories:
+  output: release
+files:
+  - dist/**/*
+  - electron/**/*
+  - package.json
+asarUnpack:
+  - "node_modules/@nut-tree-fork/**"
+win:
+  target:
+    - nsis
+  artifactName: LiveDesk-Setup-${version}.${ext}
+nsis:
+  oneClick: false
+  allowToChangeInstallationDirectory: true
+mac:
+  target:
+    - dmg
+  category: public.app-category.productivity
+  hardenedRuntime: true
+  entitlements: electron/entitlements.mac.plist
+  entitlementsInherit: electron/entitlements.mac.plist
+linux:
+  target:
+    - AppImage
+    - deb
+  category: Network

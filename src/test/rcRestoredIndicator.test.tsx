@@ -44,6 +44,7 @@ function makeRc(overrides: Partial<UseRemoteControlReturn>): UseRemoteControlRet
     grantRequest: vi.fn(),
     denyRequest: vi.fn(),
     reclaimControl: vi.fn(),
+    forceEnd: vi.fn(),
     sendCursor: vi.fn(),
     sendRipple: vi.fn(),
     sendInput: vi.fn(),

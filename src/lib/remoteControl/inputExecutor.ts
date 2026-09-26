@@ -1,11 +1,12 @@
 import type { RCInputEvent } from './protocol';
+import { getElectronDesktop } from './electronBridge';
 
 /**
  * Best-effort in-tab input dispatcher used when the presenter is a browser
  * (no Electron / nut.js available). Coordinates are normalized (0..1) against
- * the presenter's *viewport* — the only surface we can synthesize events on
- * inside a sandboxed browser tab. This works for demoing/collaborating on the
- * meeting app UI itself; it CANNOT drive the OS or other windows.
+ * the presenter's *viewport*, the only surface a sandboxed tab can synthesize
+ * events on. This demonstrates collaboration on the meeting app UI itself; it
+ * CANNOT drive the OS or other windows. The desktop app provides real control.
  */
 export function executeBrowserInput(event: RCInputEvent) {
   const vw = typeof window !== 'undefined' ? window.innerWidth : 0;
@@ -79,26 +80,22 @@ export function executeBrowserInput(event: RCInputEvent) {
   }
 }
 
-// Electron-only bridge stub; picked up automatically if the desktop build
-// exposes window.electronAPI.remoteControl. In the desktop app the preload
-// script (electron/preload.cjs) wires this to the nut-js handler running in
-// the main process, giving full OS-level mouse + keyboard control.
-interface ElectronRemoteControlBridge {
-  handleInput: (event: RCInputEvent) => void;
+/** Which execution surface is available on this presenter. */
+export type ControlCapability = 'os' | 'in-app';
+
+export function getControlCapability(): ControlCapability {
+  return getElectronDesktop() ? 'os' : 'in-app';
 }
 
-export function getElectronBridge(): ElectronRemoteControlBridge | null {
-  if (typeof window === 'undefined') return null;
-  const w = window as typeof window & {
-    electronAPI?: { remoteControl?: ElectronRemoteControlBridge };
-  };
-  return w.electronAPI?.remoteControl ?? null;
-}
-
-export function executeInput(event: RCInputEvent) {
-  const bridge = getElectronBridge();
-  if (bridge) {
-    bridge.handleInput(event);
+/**
+ * Execute a validated, authorized input event. `token` must be the control
+ * session token issued at grant time; the desktop main process only executes
+ * input for the currently armed token.
+ */
+export function executeInput(event: RCInputEvent, token: string) {
+  const desktop = getElectronDesktop();
+  if (desktop) {
+    desktop.remoteControl.handleInput(token, event);
     return;
   }
   executeBrowserInput(event);

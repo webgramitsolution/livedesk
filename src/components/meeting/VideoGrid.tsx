@@ -3,11 +3,16 @@ import { VideoTile } from './VideoTile';
 import { AnnotationOverlay } from './AnnotationOverlay';
 import { motion } from 'framer-motion';
 import { Monitor, X, PenTool } from 'lucide-react';
-import { useState, useEffect, useRef, forwardRef, useImperativeHandle } from 'react';
+import { useState, useEffect, useRef, useMemo, useCallback, forwardRef, useImperativeHandle } from 'react';
 import { RemoteControlOverlay } from './RemoteControlOverlay';
-import { useRemoteControl } from '@/hooks/useRemoteControl';
+import { useRemoteControl, type RCTransport } from '@/hooks/useRemoteControl';
 import { useAnnotations } from '@/hooks/useAnnotations';
+import { useRemoteControlSessionWatch } from '@/hooks/useRemoteControlSessionWatch';
 import { executeInput } from '@/lib/remoteControl/inputExecutor';
+import { getElectronDesktop } from '@/lib/remoteControl/electronBridge';
+import { getDataBus } from '@/lib/dataPlane';
+import { grantRemoteControl, revokeRemoteControl } from '@/lib/permissions/api';
+import { logWebRTCEvent } from '@/lib/webrtcLogger';
 
 interface VideoGridProps {
   localStream?: MediaStream | null;
@@ -82,16 +87,84 @@ export function VideoGrid({ localStream, remoteStreams, screenStream, remoteScre
   // Remote-control: overlay is active whenever there is a shared screen
   // (local or remote). The overlay both broadcasts our cursor and, when
   // control has been granted, executes real input on the presenter side.
+  // Control messages travel on the data plane (peer-to-peer) with automatic
+  // fallback; link loss is fed back so grants die with the connection.
+  const rcTransport = useMemo<RCTransport>(() => {
+    const bus = getDataBus();
+    return {
+      send: (payload) => {
+        try {
+          bus.publish('rc', payload, { to: 'to' in payload ? payload.to : undefined });
+        } catch (err) {
+          logWebRTCEvent('error', 'rc-publish-failed', { reason: String(err) });
+        }
+      },
+      subscribe: (handler) => bus.subscribe('rc', (payload) => handler(payload)),
+      onPeerLink: (handler) => bus.onPeerChannel((e) => handler(e.peerId, e.state)),
+    };
+  }, []);
+
+  // Server-issued control tokens when a backend session exists; local test
+  // mode (no user) falls back to the hook's local nonce.
+  const hasBackendSession = !!myUserId;
+  const authorizeGrant = useCallback(
+    async (controllerId: string, mode: 'mouse' | 'mouse+keyboard') => {
+      try {
+        const row = await grantRemoteControl(meetingId, meetingSessionId, controllerId, mode);
+        return { token: row.token };
+      } catch (err) {
+        const message = err instanceof Error ? err.message : 'Grant rejected';
+        return { error: message.replace(/^.*?:\s*/, '') };
+      }
+    },
+    [meetingId, meetingSessionId],
+  );
+  const notifyRevoke = useCallback(
+    async (controllerId: string, reason: string) => {
+      try {
+        await revokeRemoteControl(meetingId, controllerId, reason);
+      } catch (err) {
+        logWebRTCEvent('error', 'rc-revoke-record-failed', { reason: String(err) });
+      }
+    },
+    [meetingId],
+  );
+  const setSession = useMeetingStore((s) => s.setSession);
+  const onControlSession = useCallback(
+    (session: { token: string; controllerId: string; controllerName: string; allowKeyboard: boolean } | null) => {
+      setSession({
+        remoteControlSession: session
+          ? { token: session.token, presenterId: meetingSessionId, controllerId: session.controllerId, controllerName: session.controllerName, mode: session.allowKeyboard ? 'mouse+keyboard' : 'mouse', since: Date.now() }
+          : null,
+      });
+      // Desktop app: arm/disarm OS-level input for exactly this token.
+      const desktop = getElectronDesktop();
+      if (!desktop) return;
+      if (session) {
+        void desktop.remoteControl.startSession({ token: session.token, controllerId: session.controllerId, allowKeyboard: session.allowKeyboard, displayId: null });
+      } else {
+        const current = useMeetingStore.getState().session.remoteControlSession;
+        void desktop.remoteControl.endSession(current?.token ?? '');
+      }
+    },
+    [meetingSessionId, setSession],
+  );
+
   const rc = useRemoteControl({
     meetingId,
     isInMeeting: true,
     isLocalPresenter: isScreenSharing,
     presenterHintId: remoteScreenPeerId,
-    onExecuteInput: (event) => {
-      // Presenter side: dispatch the incoming input into the tab.
-      executeInput(event);
+    transport: rcTransport,
+    authorizeGrant: hasBackendSession ? authorizeGrant : undefined,
+    notifyRevoke: hasBackendSession ? notifyRevoke : undefined,
+    onControlSession,
+    onExecuteInput: (event, _fromName, token) => {
+      // Presenter side: input is only executed for the active session token.
+      executeInput(event, token);
     },
   });
+  useRemoteControlSessionWatch({ meetingId, enabled: hasBackendSession, rc });
 
   // Suppress the local live preview when the presenter is capturing this very tab,
   // otherwise we render a "hall of mirrors" recursion. Remote peers still receive
