@@ -109,7 +109,7 @@ export function VideoGrid({ localStream, remoteStreams, screenStream, remoteScre
 
   // Server-issued control tokens when a backend session exists; local test
   // mode (no user) falls back to the hook's local nonce.
-  const hasBackendSession = !!myUserId;
+  const hasBackendSession = useMeetingStore((s) => s.session.hasBackend);
   const authorizeGrant = useCallback(
     async (controllerId: string, mode: 'mouse' | 'mouse+keyboard') => {
       try {
@@ -165,6 +165,10 @@ export function VideoGrid({ localStream, remoteStreams, screenStream, remoteScre
     onExecuteInput: (event, _fromName, token) => {
       // Presenter side: input is only executed for the active session token.
       executeInput(event, token);
+      if (import.meta.env.DEV) {
+        const w = window as typeof window & { __livedeskExecutedInputs?: number };
+        w.__livedeskExecutedInputs = (w.__livedeskExecutedInputs ?? 0) + 1;
+      }
     },
   });
   useRemoteControlSessionWatch({ meetingId, enabled: hasBackendSession, rc });

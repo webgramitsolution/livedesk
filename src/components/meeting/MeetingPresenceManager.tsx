@@ -220,15 +220,23 @@ export function MeetingPresenceManager() {
       const session = authData.session;
       if (!session || !active) {
         if (isLocalSignalingEnabled()) {
-          // Local test mode without a backend: first tab acts as host.
-          useMeetingStore.getState().setSession({ myUserId: 'local-user', hostUserId: 'local-user', hostSessionId: localSessionId, meetingStatus: 'active' });
+          // Local test mode without a backend: the tab tagged as host (or the
+          // first tab) acts as host; others are members.
+          const role = window.sessionStorage.getItem('livedesk-e2e-role') ?? 'host';
+          const hostSession = window.sessionStorage.getItem('livedesk-e2e-host-session') ?? localSessionId;
+          useMeetingStore.getState().setSession({
+            myUserId: role === 'host' ? 'local-host' : `local-${localSessionId}`,
+            hostUserId: 'local-host',
+            hostSessionId: hostSession,
+            meetingStatus: 'active',
+          });
         }
         return;
       }
 
       const displayName = userName || session.user.email?.split('@')[0] || 'You';
       const { isMicOn: currentMicState, isCameraOn: currentCameraState } = useMeetingStore.getState();
-      useMeetingStore.getState().setSession({ myUserId: session.user.id });
+      useMeetingStore.getState().setSession({ myUserId: session.user.id, hasBackend: true });
 
       const presenceValues = {
         meeting_code: meetingId,

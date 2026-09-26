@@ -25,6 +25,7 @@ import { useMeetingRecorder } from '@/hooks/useMeetingRecorder';
 import { useVirtualBackground } from '@/hooks/useVirtualBackground';
 import { useTranslationPipeline } from '@/hooks/useTranslationPipeline';
 import { recoverRemoteAudioPlayback } from '@/lib/remoteAudioRecovery';
+import { getDataBus } from '@/lib/dataPlane';
 import { useMeetingStore } from '@/store/meetingStore';
 import { motion } from 'framer-motion';
 import { useState, useEffect, useRef } from 'react';
@@ -129,6 +130,15 @@ export function MeetingRoom() {
         assignAllToFirstRoom?: () => void;
         simulateSelfCaptureShare?: (on: boolean) => void;
       };
+      __LIVEDESK_DEBUG__?: Record<string, unknown>;
+    };
+
+    // Development-only introspection for the real-media browser tests.
+    e2eWindow.__LIVEDESK_DEBUG__ = {
+      store: useMeetingStore,
+      bus: getDataBus(),
+      getDiagnosticsSnapshot,
+      executedInputs: () => (window as typeof window & { __livedeskExecutedInputs?: number }).__livedeskExecutedInputs ?? 0,
     };
 
     e2eWindow.__ZOOM_CONNECT_E2E__ = {
@@ -159,8 +169,9 @@ export function MeetingRoom() {
 
     return () => {
       delete e2eWindow.__ZOOM_CONNECT_E2E__;
+      delete e2eWindow.__LIVEDESK_DEBUG__;
     };
-  }, []);
+  }, [getDiagnosticsSnapshot]);
 
   // Sync store recording toggle with actual MediaRecorder
   useEffect(() => {

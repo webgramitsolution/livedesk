@@ -10,7 +10,7 @@ import { getDataBus, newMessageId } from '@/lib/dataPlane';
 
 /** Wire payloads on the `chat` and `state` topics for room-level sync. */
 export type RoomChatMessage = { kind: 'chat'; id: string; text: string; sender: string; at: number };
-export type RoomStateMessage = { type: 'hand'; raised: boolean } | { type: 'reaction'; emoji: string };
+export type RoomStateMessage = { type: 'hand'; raised: boolean } | { type: 'reaction'; emoji: string } | { type: 'hello'; name: string };
 
 export interface Participant {
   /** '1' for the local participant, otherwise the remote session id. */
@@ -102,6 +102,8 @@ export interface MeetingSessionState {
   hostUserId: string | null;
   hostSessionId: string | null;
   myUserId: string | null;
+  /** True when a real backend (Supabase) session backs this meeting. */
+  hasBackend: boolean;
   meetingStatus: 'active' | 'ended' | 'unknown';
   meetingControls: MeetingControls;
   /** Raw permission rows keyed by session id. */
@@ -200,6 +202,9 @@ interface MeetingState {
   sendChatMessage: (text: string) => void;
   receiveChatMessage: (message: RoomChatMessage, fromSessionId: string) => void;
   setRemoteHandRaised: (sessionId: string, raised: boolean) => void;
+  /** Adds a placeholder participant for a connected peer until presence data arrives. */
+  ensurePeerParticipant: (sessionId: string, name: string) => void;
+  removePeerParticipant: (sessionId: string) => void;
   sendReaction: (emoji: string, participantId: string) => void;
   removeReaction: (reactionId: string) => void;
   setSelectedLanguage: (lang: string) => void;
@@ -249,6 +254,7 @@ const INITIAL_SESSION: MeetingSessionState = {
   hostUserId: null,
   hostSessionId: null,
   myUserId: null,
+  hasBackend: false,
   meetingStatus: 'unknown',
   meetingControls: DEFAULT_MEETING_CONTROLS,
   permissionRows: {},
@@ -512,6 +518,23 @@ export const useMeetingStore = create<MeetingState>((set, get) => ({
         unreadChats: s.rightPanel === 'chat' ? 0 : s.unreadChats + 1,
       };
     }),
+  ensurePeerParticipant: (sessionId, name) =>
+    set((s) => {
+      if (!sessionId || sessionId === s.meetingSessionId) return {};
+      const existing = s.participants.find((p) => p.sessionId === sessionId);
+      if (existing) {
+        return existing.name === name ? {} : { participants: s.participants.map((p) => (p.sessionId === sessionId ? { ...p, name } : p)) };
+      }
+      const avatar = name.split(' ').filter(Boolean).slice(0, 2).map((part) => part[0]?.toUpperCase() ?? '').join('') || 'U';
+      return {
+        participants: [
+          ...s.participants,
+          { id: sessionId, sessionId, userId: null, name, isMuted: false, isCameraOn: true, isSpeaking: false, handRaised: false, handRaisedAt: null, avatar, spokenLanguage: 'en' },
+        ],
+      };
+    }),
+  removePeerParticipant: (sessionId) =>
+    set((s) => ({ participants: s.participants.filter((p) => p.sessionId !== sessionId || p.id === '1') })),
   setRemoteHandRaised: (sessionId, raised) =>
     set((s) => ({
       participants: s.participants.map((p) =>

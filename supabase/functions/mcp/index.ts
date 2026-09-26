@@ -121,7 +121,7 @@ var list_active_meetings_default = defineTool3({
 });
 
 // src/lib/mcp/index.ts
-var projectRef = "xgfgcklvrlvkqvvbpcvv";
+var projectRef = "e2e";
 var mcp_default = defineMcp({
   name: "zoom-connect-mcp",
   title: "LiveDesk",
