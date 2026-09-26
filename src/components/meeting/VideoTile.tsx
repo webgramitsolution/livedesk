@@ -89,12 +89,13 @@ export function VideoTile({ participant, subtitle, compact, mediaStream }: Video
   const permissionRows = useMeetingStore((s) => s.session.permissionRows);
   const meetingControls = useMeetingStore((s) => s.session.meetingControls);
   const hostSessionId = useMeetingStore((s) => s.session.hostSessionId);
-  const remoteCanSpeak = useMemo(() => {
-    if (participant.id === '1') return true;
-    return useMeetingStore.getState().permissionFor(participant.sessionId).canSpeak;
+  const participantPermission = useMemo(() => {
+    return useMeetingStore.getState().permissionFor(participant.id === '1' ? useMeetingStore.getState().meetingSessionId : participant.sessionId);
     // permissionRows / meetingControls / hostSessionId are the inputs of permissionFor.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [participant.id, participant.sessionId, permissionRows, meetingControls, hostSessionId]);
+  const remoteCanSpeak = participant.id === '1' ? true : participantPermission.canSpeak;
+  const hasControl = participantPermission.remoteControlGranted;
   useEffect(() => {
     if (participant.id === '1' || !audioRef.current) return;
     audioRef.current.muted = !remoteCanSpeak;
@@ -205,7 +206,7 @@ export function VideoTile({ participant, subtitle, compact, mediaStream }: Video
       animate={{ opacity: 1, scale: 1 }}
       transition={{ duration: 0.3 }}
       className={`relative rounded-xl overflow-hidden bg-video tile-elevated group w-full h-full ${
-        participant.hasMouseControl ? 'glow-ring' : ''
+        hasControl ? 'glow-ring' : ''
       } ${participant.isSpeaking ? 'ring-2 ring-success' : ''}`}
     >
       {mediaStream && participant.id !== '1' ? (
@@ -280,7 +281,7 @@ export function VideoTile({ participant, subtitle, compact, mediaStream }: Video
             {participant.name}
           </span>
           <div className="flex items-center gap-1">
-            {participant.hasMouseControl && !compact && (
+            {hasControl && !compact && (
               <span className="text-[10px] font-bold bg-primary text-primary-foreground px-1.5 py-0.5 rounded-full">
                 CTRL
               </span>

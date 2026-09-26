@@ -78,6 +78,9 @@ export function VideoGrid({ localStream, remoteStreams, screenStream, remoteScre
   // Presentation identity for annotations: the presenter's session id.
   const presenterId = isScreenSharing ? meetingSessionId : remoteScreenPeerId ?? null;
   const annotations = useAnnotations({ presenterId, enabled: !!presenterId });
+  useEffect(() => {
+    useMeetingStore.getState().setSession({ presenterId });
+  }, [presenterId]);
 
   // Leave drawing mode when the share ends or permission is withdrawn.
   useEffect(() => {
@@ -166,6 +169,7 @@ export function VideoGrid({ localStream, remoteStreams, screenStream, remoteScre
   });
   useRemoteControlSessionWatch({ meetingId, enabled: hasBackendSession, rc });
 
+
   // Suppress the local live preview when the presenter is capturing this very tab,
   // otherwise we render a "hall of mirrors" recursion. Remote peers still receive
   // the outgoing track — only local rendering is replaced with a static thumbnail.
@@ -177,6 +181,23 @@ export function VideoGrid({ localStream, remoteStreams, screenStream, remoteScre
   const remoteScreenTrackLive = !!remoteScreenStream
     ?.getVideoTracks()
     .some((t) => t.readyState === 'live' && !t.muted);
+
+  // Viewer-side control state for the bottom toolbar "Control" button, and a
+  // window-level toggle so the toolbar can request/release without owning rc.
+  const canRequestControl = !rc.isLocalPresenter && !!rc.remotePresenterId && remoteScreenTrackLive && myPermission.canRequestRemoteControl;
+  const rcViewerState = rc.status.state === 'controlling' ? 'controlling' : rc.status.state === 'requesting' ? 'requesting' : canRequestControl ? 'idle' : 'unavailable';
+  useEffect(() => {
+    useMeetingStore.getState().setSession({ rcViewerState });
+  }, [rcViewerState]);
+  useEffect(() => {
+    const onToggle = () => {
+      if (rc.status.state === 'controlling') rc.releaseControl();
+      else if (rc.status.state === 'requesting') rc.cancelRequest();
+      else if (canRequestControl) rc.requestControl();
+    };
+    window.addEventListener('livedesk:rc-toggle', onToggle);
+    return () => window.removeEventListener('livedesk:rc-toggle', onToggle);
+  }, [rc, canRequestControl]);
 
   // Static thumbnail: capture ONE frame from the camera stream when we start
   // suppressing the preview, so the "You are presenting" card shows a real

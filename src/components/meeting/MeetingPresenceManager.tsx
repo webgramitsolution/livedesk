@@ -118,8 +118,6 @@ export function MeetingPresenceManager() {
             isMuted: !row.is_mic_on,
             isCameraOn: row.is_camera_on,
             isSpeaking: previous?.isSpeaking ?? false,
-            hasMouseControl: previous?.hasMouseControl ?? false,
-            mouseControlRequested: previous?.mouseControlRequested ?? false,
             handRaised: previous?.handRaised ?? false,
             handRaisedAt: previous?.handRaisedAt ?? null,
             avatar: getInitials(row.display_name),

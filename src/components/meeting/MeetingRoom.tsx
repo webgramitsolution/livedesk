@@ -37,7 +37,18 @@ export function MeetingRoom() {
   const setRightPanel = useMeetingStore((s) => s.setRightPanel);
   const isMobile = useIsMobile();
   const videoAreaRef = useRef<HTMLDivElement>(null);
-  const { localStream, remoteStreams, screenStream, remoteScreenStream, remoteScreenPeerId, getPeerStats, getPeerDiagnostics, getDiagnosticsSnapshot, selectLocalDevices } = useWebRTC(meetingId, screen === 'meeting');
+  const { localStream, remoteStreams, screenStream, remoteScreenStream, remoteScreenPeerId, peerStates, connectionSummary, getPeerStats, getPeerDiagnostics, getDiagnosticsSnapshot, selectLocalDevices } = useWebRTC(meetingId, screen === 'meeting');
+  const setSession = useMeetingStore((s) => s.setSession);
+
+  // Mirror the media-plane connection state into the central session state
+  // so the top bar and participant panel show real connection status.
+  useEffect(() => {
+    const states: Record<string, string> = {};
+    peerStates.forEach((state, peerId) => {
+      states[peerId] = state;
+    });
+    setSession({ peerConnectionStates: states, connectionState: connectionSummary });
+  }, [peerStates, connectionSummary, setSession]);
 
   const PANEL_CYCLE: Array<'ai' | 'participants' | 'chat'> = ['ai', 'participants', 'chat'];
   useSwipeGesture(videoAreaRef, {

@@ -17,8 +17,6 @@ export interface Participant {
   isMuted: boolean;
   isCameraOn: boolean;
   isSpeaking: boolean;
-  hasMouseControl: boolean;
-  mouseControlRequested: boolean;
   handRaised: boolean;
   handRaisedAt: number | null;
   avatar: string;
@@ -87,6 +85,10 @@ export interface MeetingSessionState {
   presenterId: string | null;
   remoteControlSession: RemoteControlSessionState | null;
   connectionState: ConnectionState;
+  /** Per remote session id: RTCPeerConnection state as observed locally. */
+  peerConnectionStates: Record<string, string>;
+  /** Viewer-side remote control state (for the toolbar button). */
+  rcViewerState: 'unavailable' | 'idle' | 'requesting' | 'controlling';
   /** Set when the host removed us or ended the meeting so the lobby can explain why. */
   leaveReason: string | null;
 }
@@ -169,9 +171,6 @@ interface MeetingState {
   toggleSettings: () => void;
   setRightPanel: (panel: RightPanel) => void;
   toggleRightPanel: (panel: 'ai' | 'participants' | 'chat') => void;
-  requestMouseControl: (participantId: string) => void;
-  grantMouseControl: (participantId: string) => void;
-  revokeMouseControl: () => void;
   toggleHandRaise: (participantId: string) => void;
   sendChatMessage: (text: string) => void;
   sendReaction: (emoji: string, participantId: string) => void;
@@ -211,7 +210,7 @@ interface MeetingState {
 }
 
 const INITIAL_PARTICIPANTS: Participant[] = [
-  { id: '1', sessionId: '', userId: null, name: 'You', isMuted: false, isCameraOn: true, isSpeaking: false, hasMouseControl: false, mouseControlRequested: false, handRaised: false, handRaisedAt: null, avatar: 'Y', spokenLanguage: 'en' },
+  { id: '1', sessionId: '', userId: null, name: 'You', isMuted: false, isCameraOn: true, isSpeaking: false, handRaised: false, handRaisedAt: null, avatar: 'Y', spokenLanguage: 'en' },
 ];
 
 const INITIAL_SESSION: MeetingSessionState = {
@@ -224,6 +223,8 @@ const INITIAL_SESSION: MeetingSessionState = {
   presenterId: null,
   remoteControlSession: null,
   connectionState: 'connecting',
+  peerConnectionStates: {},
+  rcViewerState: 'unavailable',
   leaveReason: null,
 };
 
@@ -264,8 +265,6 @@ const createLocalParticipant = (name: string, sessionId = ''): Participant => ({
   isMuted: false,
   isCameraOn: true,
   isSpeaking: false,
-  hasMouseControl: false,
-  mouseControlRequested: false,
   handRaised: false,
   handRaisedAt: null,
   avatar: (name || 'Y')[0]?.toUpperCase() || 'Y',
@@ -417,25 +416,6 @@ export const useMeetingStore = create<MeetingState>((set, get) => ({
       rightPanel: s.rightPanel === panel ? null : panel,
       unreadChats: panel === 'chat' ? 0 : s.unreadChats,
     })),
-  requestMouseControl: (participantId) =>
-    set((s) => ({
-      participants: s.participants.map((p) => ({
-        ...p,
-        mouseControlRequested: p.id === participantId ? !p.mouseControlRequested : p.mouseControlRequested,
-      })),
-    })),
-  grantMouseControl: (participantId) =>
-    set((s) => ({
-      participants: s.participants.map((p) => ({
-        ...p,
-        hasMouseControl: p.id === participantId,
-        mouseControlRequested: p.id === participantId ? false : p.mouseControlRequested,
-      })),
-    })),
-  revokeMouseControl: () =>
-    set((s) => ({
-      participants: s.participants.map((p) => ({ ...p, hasMouseControl: false })),
-    })),
   toggleHandRaise: (participantId) =>
     set((s) => ({
       participants: s.participants.map((p) =>
@@ -585,8 +565,6 @@ export const useMeetingStore = create<MeetingState>((set, get) => ({
             isMuted: false,
             isCameraOn: true,
             isSpeaking: false,
-            hasMouseControl: false,
-            mouseControlRequested: false,
             handRaised: false,
             handRaisedAt: null,
             avatar: name.split(' ').map((n: string) => n[0]).join(''),
